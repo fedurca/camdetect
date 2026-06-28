@@ -606,8 +606,13 @@ class Pipeline:
             "ts": time.time(),
         }
 
-    def benchmark(self, frames: int = 20) -> dict:
-        """Report compute device and a quick inference FPS estimate."""
+    def benchmark(self, frames: int = 12) -> dict:
+        """Report compute device and a quick inference FPS estimate.
+
+        Reuses an existing detector (never builds a second model in the request
+        thread) and runs under the detector's lock so it can't race the camera
+        threads - which previously caused a segfault.
+        """
         info: dict = {"cuda": False, "device": "cpu", "gpus": []}
         try:
             import torch
@@ -620,16 +625,21 @@ class Pipeline:
         except Exception:  # pragma: no cover
             pass
 
-        # Build/grab a detector and time inference on a dummy frame.
+        # Only benchmark an already-loaded detector to avoid loading a second
+        # model concurrently (a common crash source). In demo there is none.
+        det = None
+        if getattr(self, "detectors", None):
+            det = self.detectors.get(self.cfg.cameras[0].id)
+        if det is None:
+            info["note"] = ("detekce neni aktivni (demo/vypnuto) - spust v 'live'"
+                            " rezimu pro mereni modelu")
+            return info
+
         try:
-            from .detector import Detector
-            det = (self.detectors.get(self.cfg.cameras[0].id)
-                   if self.mode == "live" and getattr(self, "detectors", None)
-                   else Detector(self.cfg.detection,
-                                 device=info["device"] if info["cuda"] else "cpu"))
             imgsz = int(self.settings.get("video", "imgsz", default=self.cfg.detection.imgsz))
+            det.cfg.imgsz = imgsz
             dummy = np.random.randint(0, 255, (1080, 1920, 3), dtype=np.uint8)
-            det.detect(dummy)  # warmup
+            det.detect(dummy)  # warmup (locked internally)
             t0 = time.time()
             for _ in range(max(1, frames)):
                 det.detect(dummy)

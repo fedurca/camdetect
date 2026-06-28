@@ -11,6 +11,7 @@ multi-GPU rig, construct one :class:`Detector` per device (see ``device``).
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 from typing import Optional
 
@@ -20,6 +21,18 @@ from .classes import COCO_NAMES, canonical_name
 from .config import DetectionConfig, OpenVocabConfig
 
 logger = logging.getLogger(__name__)
+
+
+def limit_threads() -> None:
+    """Cap torch CPU threads to avoid OpenMP oversubscription / instability."""
+    try:
+        import os
+
+        import torch
+        n = max(1, min(8, (os.cpu_count() or 4)))
+        torch.set_num_threads(n)
+    except Exception:  # pragma: no cover
+        pass
 
 
 @dataclass
@@ -76,6 +89,9 @@ class Detector:
         self.model = YOLO(cfg.model)
         # Names provided by the model (fallback to our COCO map).
         self._names = getattr(self.model, "names", None) or COCO_NAMES
+        # ultralytics/torch models are NOT safe for concurrent predict() on the
+        # same instance (camera threads + benchmark). Serialize per model.
+        self._lock = threading.Lock()
 
     def name_for(self, class_id: int) -> str:
         name = None
@@ -85,28 +101,30 @@ class Detector:
 
     def detect(self, frame: np.ndarray) -> list[Detection]:
         """Run detection on a single BGR frame. Returns detections in original px."""
-        results = self.model.predict(
-            frame,
-            imgsz=self.cfg.imgsz,
-            conf=self.cfg.confidence,
-            classes=self.cfg.classes,
-            device=self.device,
-            verbose=False,
-        )
+        with self._lock:
+            results = self.model.predict(
+                frame,
+                imgsz=self.cfg.imgsz,
+                conf=self.cfg.confidence,
+                classes=self.cfg.classes,
+                device=self.device,
+                verbose=False,
+            )
         return self._parse(results)
 
     def detect_batch(self, frames: list[np.ndarray]) -> list[list[Detection]]:
         """Batched detection (used on GPU). Returns one list per input frame."""
         if not frames:
             return []
-        results = self.model.predict(
-            frames,
-            imgsz=self.cfg.imgsz,
-            conf=self.cfg.confidence,
-            classes=self.cfg.classes,
-            device=self.device,
-            verbose=False,
-        )
+        with self._lock:
+            results = self.model.predict(
+                frames,
+                imgsz=self.cfg.imgsz,
+                conf=self.cfg.confidence,
+                classes=self.cfg.classes,
+                device=self.device,
+                verbose=False,
+            )
         return [self._parse([r]) for r in results]
 
     def _parse(self, results) -> list[Detection]:
@@ -144,6 +162,7 @@ class OpenVocabDetector:
         self.device = resolve_device(device or "auto")
         logger.info("Loading open-vocab model %s on %s", cfg.model, self.device)
         self.model = YOLOWorld(cfg.model)
+        self._lock = threading.Lock()
         self.set_prompts(cfg.prompts)
 
     def set_prompts(self, prompts: list[str]) -> None:
@@ -154,9 +173,10 @@ class OpenVocabDetector:
     def detect(self, frame: np.ndarray, imgsz: int,
                confidence: Optional[float] = None) -> list[Detection]:
         conf = self.cfg.confidence if confidence is None else confidence
-        results = self.model.predict(
-            frame, imgsz=imgsz, conf=conf, device=self.device, verbose=False,
-        )
+        with self._lock:
+            results = self.model.predict(
+                frame, imgsz=imgsz, conf=conf, device=self.device, verbose=False,
+            )
         out: list[Detection] = []
         for res in results:
             boxes = getattr(res, "boxes", None)

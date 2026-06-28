@@ -38,6 +38,13 @@ cfg = load_config(CONFIG_PATH) if CONFIG_PATH else load_config()
 setup_logging(cfg)
 logger = logging.getLogger("camdetect")
 
+# Cap torch CPU threads (avoids OpenMP oversubscription / instability).
+try:
+    from .detector import limit_threads
+    limit_threads()
+except Exception:  # pragma: no cover
+    pass
+
 settings = Settings(cfg)
 STARTUP_PATH = cfg.abspath("data/startup.json")
 settings.load_startup(STARTUP_PATH)
