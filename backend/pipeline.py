@@ -79,6 +79,9 @@ class Pipeline:
             max_age_s=cfg.fusion.max_age_s,
             smoothing=cfg.fusion.smoothing,
             default_height_m=cfg.fusion.default_height_m,
+            min_cameras=cfg.fusion.min_cameras,
+            min_hits=cfg.fusion.min_hits,
+            confirm_window_s=cfg.fusion.confirm_window_s,
         )
 
         self._annotated: dict[str, bytes] = {}
@@ -314,6 +317,8 @@ class Pipeline:
                 dets: list[WorldDetection] = []
                 for d in self._world_dets.values():
                     dets.extend(d)
+            self.fusion.min_cameras = int(self.settings.get(
+                "video", "min_cameras", default=self.cfg.fusion.min_cameras))
             tracks = self.fusion.update(dets)
             self._attach_engine_type(tracks)
             if (self.settings.get("vehicles", "enabled", default=False)):
@@ -528,6 +533,8 @@ class Pipeline:
                             WorldDetection(cam.id, cid, name, conf, nx, ny))
 
             dets = [d for lst in world_by_cam.values() for d in lst]
+            self.fusion.min_cameras = int(self.settings.get(
+                "video", "min_cameras", default=self.cfg.fusion.min_cameras))
             tracks = self.fusion.update(dets)
             self._attach_engine_type(tracks)
             if attrs.get("age"):

@@ -93,6 +93,12 @@ class FusionConfig:
     max_age_s: float = 2.0
     smoothing: float = 0.5
     default_height_m: float = 1.7
+    # An object is only shown/logged once it has been confirmed by at least
+    # this many cameras within a short window and seen for this many updates -
+    # this strongly suppresses single-camera false positives.
+    min_cameras: int = 2
+    min_hits: int = 3
+    confirm_window_s: float = 2.5
 
 
 @dataclass

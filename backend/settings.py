@@ -46,6 +46,7 @@ class Settings:
                     "confidence": d.open_vocabulary.confidence,
                     "prompts": list(d.open_vocabulary.prompts),
                 },
+                "min_cameras": cfg.fusion.min_cameras,
             },
             "attributes": {
                 "behavior": d.attributes.behavior,

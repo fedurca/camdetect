@@ -52,6 +52,7 @@ class Track:
     hits: int = 0
     # motion / attributes
     history: deque = field(default_factory=lambda: deque(maxlen=64))
+    cam_seen: dict = field(default_factory=dict)   # camera_id -> last seen ts
     speed: float = 0.0
     behavior: Optional[str] = None
     age: Optional[str] = None          # experimental, from attributes module
@@ -63,6 +64,14 @@ class Track:
     model: Optional[str] = None
     vehicle_age: Optional[str] = None
     drivetrain: Optional[str] = None
+
+    def recent_cameras(self, now: float, window: float) -> int:
+        return sum(1 for ts in self.cam_seen.values() if now - ts <= window)
+
+    def confirmed(self, now: float, min_cameras: int, min_hits: int,
+                  window: float) -> bool:
+        return (self.hits >= min_hits and
+                self.recent_cameras(now, window) >= min_cameras)
 
     def update_motion(self, now: float) -> None:
         """Recompute speed and behavior from recent history."""
@@ -154,11 +163,16 @@ class _Cluster:
 
 class Fusion:
     def __init__(self, merge_distance_m: float = 1.5, max_age_s: float = 2.0,
-                 smoothing: float = 0.5, default_height_m: float = 1.7):
+                 smoothing: float = 0.5, default_height_m: float = 1.7,
+                 min_cameras: int = 2, min_hits: int = 3,
+                 confirm_window_s: float = 2.5):
         self.merge_distance_m = merge_distance_m
         self.max_age_s = max_age_s
         self.smoothing = smoothing
         self.default_height_m = default_height_m
+        self.min_cameras = min_cameras
+        self.min_hits = min_hits
+        self.confirm_window_s = confirm_window_s
         self.tracks: dict[int, Track] = {}
         self._ids = count(1)
 
@@ -242,6 +256,8 @@ class Fusion:
                 t.cameras = cluster.cameras
                 t.last_update = now
                 t.hits += 1
+                for cam in cluster.cameras:
+                    t.cam_seen[cam] = now
                 t.update_motion(now)
                 unmatched.discard(best_id)
             else:
@@ -252,6 +268,8 @@ class Fusion:
                     height=height_for(cluster.class_name, self.default_height_m),
                     cameras=cluster.cameras, last_update=now, first_seen=now, hits=1,
                 )
+                for cam in cluster.cameras:
+                    track.cam_seen[cam] = now
                 track.update_motion(now)
                 self.tracks[tid] = track
 
@@ -262,7 +280,12 @@ class Fusion:
             if now - self.tracks[tid].last_update > self.max_age_s:
                 del self.tracks[tid]
 
-        return list(self.tracks.values())
+        # -- step 4: only return CONFIRMED tracks -------------------------
+        # Unconfirmed tracks stay internally so they can be confirmed later,
+        # but are not shown/logged - this suppresses false positives.
+        return [t for t in self.tracks.values()
+                if t.confirmed(now, self.min_cameras, self.min_hits,
+                               self.confirm_window_s)]
 
     def _dedupe_tracks(self) -> None:
         """Collapse pre-existing tracks of the same group that drifted within

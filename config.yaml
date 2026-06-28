@@ -35,8 +35,8 @@ detection:
   # Long-side resolution used for inference. Frames are downscaled to this.
   imgsz: 960
 
-  # Minimum confidence for a detection to be kept.
-  confidence: 0.35
+  # Minimum confidence for a detection to be kept (higher = fewer false positives).
+  confidence: 0.45
 
   # Target inference rate per camera (frames/second). CPU: keep low.
   fps: 3
@@ -137,6 +137,12 @@ fusion:
   smoothing: 0.5
   # Default assumed object height (m) for 3D boxes when class height unknown.
   default_height_m: 1.7
+  # Confirmation: only show/log an object once >= min_cameras have seen it
+  # within confirm_window_s and it has >= min_hits updates. Set min_cameras: 3
+  # to require all three cameras. This removes single-camera false positives.
+  min_cameras: 2
+  min_hits: 3
+  confirm_window_s: 2.5
 
 # ---------------------------------------------------------------------------
 # Audio detection (audio is part of each camera's RTSP stream)
