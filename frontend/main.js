@@ -35,6 +35,7 @@ function objectLabel(o) {
   if (o.engine_type) s += ` · ${o.engine_type}`;
   if (o.plate) s += ` · ${o.plate}`;
   if (o.make) s += ` · ${o.make} ${o.model || ""}`.trimEnd();
+  if (o.speech) s += ` · "${o.speech}"`;
   return s;
 }
 
@@ -324,8 +325,10 @@ function drawTranscript() {
   const el = document.getElementById("transcript");
   const segs = latestTranscripts[selectedAudioCam] || [];
   if (!segs.length) { el.innerHTML = '<div class="muted">(zadny prepis)</div>'; return; }
-  el.innerHTML = segs.map((s) =>
-    `<div class="seg"><span class="spk">${s.speaker || "S1"}</span>${s.text}</div>`).join("");
+  el.innerHTML = segs.map((s) => {
+    const who = s.person ? `${s.person} (${s.speaker || "S1"})` : (s.speaker || "S1");
+    return `<div class="seg"><span class="spk">${who}</span>${s.text}</div>`;
+  }).join("");
 }
 
 // ---------------------------------------------------------------------------
@@ -368,7 +371,7 @@ async function loadHistory() {
 
 function attrPills(attrs) {
   const keep = ["behavior", "age", "engine_type", "plate", "make", "model",
-    "vehicle_age", "drivetrain"];
+    "vehicle_age", "drivetrain", "speaker", "speech"];
   return keep.filter((k) => attrs[k]).map((k) =>
     `<span class="pill">${attrs[k]}</span>`).join("");
 }
