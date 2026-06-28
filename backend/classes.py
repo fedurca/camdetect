@@ -26,6 +26,27 @@ COCO_NAMES = {
     23: "giraffe",
 }
 
+# Canonical names for the open-vocabulary (YOLO-World) classes that are not in
+# COCO. Several prompt phrasings map to one canonical class.
+OPEN_VOCAB_ALIASES = {
+    "trash bin": "trash bin",
+    "garbage can": "trash bin",
+    "dustbin": "trash bin",
+    "kick scooter": "scooter",
+    "scooter": "scooter",
+    "roller skates": "skates",
+    "inline skates": "skates",
+    "rollerblades": "skates",
+    "drone": "drone",
+    "quadcopter": "drone",
+}
+
+
+def canonical_name(name: str) -> str:
+    """Normalize a detector/prompt label to a canonical class name."""
+    return OPEN_VOCAB_ALIASES.get(name.strip().lower(), name)
+
+
 # class name -> RGB (0-255). Kept in sync with frontend/colors.js.
 CLASS_COLORS = {
     "person": (239, 68, 68),     # red
@@ -44,6 +65,11 @@ CLASS_COLORS = {
     "bear": (120, 53, 15),
     "zebra": (226, 232, 240),
     "giraffe": (202, 138, 4),
+    # open-vocabulary additions
+    "trash bin": (74, 222, 128),   # green
+    "scooter": (34, 211, 238),     # cyan
+    "skates": (232, 121, 249),     # fuchsia
+    "drone": (250, 250, 250),      # white
 }
 
 DEFAULT_COLOR = (148, 163, 184)  # slate-400
@@ -62,6 +88,30 @@ CLASS_HEIGHTS = {
     "horse": 1.6,
     "sheep": 1.0,
     "cow": 1.5,
+    "trash bin": 1.1,
+    "scooter": 1.1,
+    "skates": 1.7,
+    "drone": 0.3,
+}
+
+# Czech display labels for the UI legend/overlays.
+CLASS_LABELS_CS = {
+    "person": "clovek",
+    "bicycle": "kolo",
+    "car": "auto",
+    "motorcycle": "motorka",
+    "bus": "autobus",
+    "truck": "nakladni auto",
+    "bird": "ptak",
+    "cat": "kocka",
+    "dog": "pes",
+    "horse": "kun",
+    "sheep": "ovce",
+    "cow": "krava",
+    "trash bin": "popelnice",
+    "scooter": "kolobezka",
+    "skates": "brusle",
+    "drone": "dron",
 }
 
 
@@ -71,3 +121,7 @@ def color_for(name: str) -> tuple[int, int, int]:
 
 def height_for(name: str, default: float = 1.7) -> float:
     return CLASS_HEIGHTS.get(name, default)
+
+
+def label_cs(name: str) -> str:
+    return CLASS_LABELS_CS.get(name, name)
