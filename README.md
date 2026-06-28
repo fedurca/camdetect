@@ -139,6 +139,23 @@ API: `POST /api/record/start {cam,duration}`, `POST /api/record/stop {cam}`,
 `ffprobe file.mkv` (shows a `subrip` subtitle stream) or play in mpv/VLC with
 subtitles enabled.
 
+## Camera coverage (from the UniFi coverage map)
+
+Each camera has a ground **coverage wedge** defined by its world position, look
+azimuth and field of view (`config.yaml` per-camera `azimuth_deg`/`fov_deg`/
+`range_m`; `azimuth_deg: null` auto-aims at the camera-cluster centroid). It is
+used two ways:
+
+- **Visualization**: the wedges are drawn in the top-down view and as flat
+  sectors on the 3D ground, mirroring the UniFi Protect coverage plan.
+- **Precision**: a detection whose ground projection falls outside the camera's
+  coverage wedge is rejected (it is almost always a homography/labeling error),
+  which removes ghost detections and tightens cross-camera fusion.
+
+Set `azimuth_deg`/`range_m` per camera from the UniFi coverage map for the most
+accurate wedges (cam2 faces the garage gate, cam3 is to its left, cam4 to its
+right).
+
 ## Duplicate-detection handling
 
 The same physical object seen from several cameras (often with a flipped label,

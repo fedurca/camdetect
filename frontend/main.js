@@ -115,6 +115,7 @@ function labelSprite(text, rgb) {
 }
 
 function buildCameras(cameras) {
+  const cov = (appConfig && appConfig.coverage) || {};
   for (const cam of cameras) {
     const [X, Y] = cam.world_xy;
     const pos = worldToScene(X, Y, cam.height_m);
@@ -125,9 +126,35 @@ function buildCameras(cameras) {
     scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(
       [pos, worldToScene(X, Y, 0)]),
       new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.5 })));
-    scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(
-      [pos, worldToScene(center.x, center.y, 0.2)]),
-      new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.25 })));
+
+    // coverage wedge on the ground, oriented along the camera azimuth
+    const cv = cov[cam.id];
+    if (cv) {
+      const az = (cv.azimuth_deg * Math.PI) / 180;
+      const half = (cv.fov_deg * Math.PI) / 180 / 2;
+      const R = cv.range_m;
+      const shape = new THREE.Shape();
+      shape.moveTo(0, 0);
+      const steps = 24;
+      for (let i = 0; i <= steps; i++) {
+        const a = az - half + (2 * half * i) / steps;
+        shape.lineTo(R * Math.cos(a), R * Math.sin(a));
+      }
+      const geo = new THREE.ShapeGeometry(shape);
+      geo.rotateX(-Math.PI / 2);  // lay flat on ground (XZ), shape XY -> XZ
+      const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+        color: 0x38bdf8, transparent: true, opacity: 0.08, side: THREE.DoubleSide,
+        depthWrite: false,
+      }));
+      const g = worldToScene(X, Y, 0.02);
+      mesh.position.set(g.x, g.y, g.z);
+      scene.add(mesh);
+    } else {
+      scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(
+        [pos, worldToScene(center.x, center.y, 0.2)]),
+        new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.25 })));
+    }
+
     const tag = labelSprite(cam.id, [56, 189, 248]);
     tag.position.copy(pos.clone().add(new THREE.Vector3(0, 0.9, 0)));
     tag.scale.set(1.6, 0.35, 1);
@@ -219,12 +246,32 @@ function drawTopdown() {
   for (let g = Math.ceil(bounds.minY); g <= bounds.maxY; g += 2) {
     const [, y] = tdPt(0, g); tdx.beginPath(); tdx.moveTo(0, y); tdx.lineTo(td.width, y); tdx.stroke();
   }
-  // cameras
-  const [ccx, ccy] = tdPt(center.x, center.y);
+  // camera coverage wedges (from the UniFi coverage map)
+  const cov = appConfig.coverage || {};
+  for (const c of appConfig.cameras) {
+    const cv = cov[c.id];
+    if (!cv) continue;
+    const az = (cv.azimuth_deg * Math.PI) / 180;
+    const half = (cv.fov_deg * Math.PI) / 180 / 2;
+    const R = cv.range_m;
+    const [px, py] = tdPt(cv.x, cv.y);
+    tdx.beginPath();
+    tdx.moveTo(px, py);
+    const steps = 16;
+    for (let i = 0; i <= steps; i++) {
+      const a = az - half + (2 * half * i) / steps;
+      const [wx, wy] = [cv.x + R * Math.cos(a), cv.y + R * Math.sin(a)];
+      const [ex, ey] = tdPt(wx, wy);
+      tdx.lineTo(ex, ey);
+    }
+    tdx.closePath();
+    tdx.fillStyle = "rgba(56,189,248,0.10)";
+    tdx.strokeStyle = "rgba(56,189,248,0.35)";
+    tdx.fill(); tdx.stroke();
+  }
+  // camera markers
   for (const c of appConfig.cameras) {
     const [px, py] = tdPt(c.world_xy[0], c.world_xy[1]);
-    tdx.strokeStyle = "rgba(56,189,248,0.35)"; tdx.beginPath();
-    tdx.moveTo(px, py); tdx.lineTo(ccx, ccy); tdx.stroke();
     tdx.fillStyle = "#38bdf8"; tdx.beginPath();
     tdx.moveTo(px, py - 6); tdx.lineTo(px - 5, py + 5); tdx.lineTo(px + 5, py + 5);
     tdx.closePath(); tdx.fill();
