@@ -117,7 +117,8 @@ class Database:
             obj_id = self._track_to_obj.get(t["id"])
             attrs = {k: t.get(k) for k in
                      ("behavior", "age", "engine_type", "plate", "make",
-                      "model", "vehicle_age", "drivetrain", "cameras")
+                      "model", "vehicle_age", "drivetrain", "speech", "speaker",
+                      "cameras")
                      if t.get(k) is not None}
             if obj_id is None:
                 obj_id = self._find_similar(cur, t, now)

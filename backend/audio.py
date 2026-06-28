@@ -134,6 +134,7 @@ class SyntheticAudioSource(AudioSource):
     def __init__(self, sample_rate: int, seed: int = 0):
         self.sample_rate = sample_rate
         self.connected = True
+        self._seed = seed
         self._t = 0.0
         self._last = time.time()
         self._rng = np.random.default_rng(seed)
@@ -173,6 +174,15 @@ class SyntheticAudioSource(AudioSource):
             burst = self._rng.standard_normal(n).astype(np.float32)
             sig += 0.4 * burst * np.hanning(max(n, 1)).astype(np.float32)
 
+        # "Speech" most of the time (~5s every 8s) with per-camera loudness so
+        # the speaker localizer has a distinct energy pattern across the 3 mics.
+        if (self._t % 8.0) < 5.0:
+            gain = [0.30, 0.18, 0.12][self._seed % 3]
+            voice = (np.sin(2 * np.pi * 180 * t)
+                     + 0.6 * np.sin(2 * np.pi * 420 * t)
+                     + 0.4 * np.sin(2 * np.pi * 850 * t))
+            sig += gain * voice.astype(np.float32)
+
         return sig.astype(np.float32)
 
 
@@ -187,6 +197,9 @@ class AudioResult:
     bands: dict = field(default_factory=lambda: {"low": 0.0, "mid": 0.0, "high": 0.0})
     events: list = field(default_factory=list)   # [{"type":str,"conf":float}]
     engine_type: Optional[str] = None             # 2T / 4T / unknown
+    # Speech-band loudness proxy (RMS x mid-band ratio) used to localize the
+    # speaker across the three camera microphones.
+    speech_level: float = 0.0
     connected: bool = False
 
     def to_dict(self) -> dict:
@@ -197,6 +210,7 @@ class AudioResult:
             "bands": {k: round(v, 3) for k, v in self.bands.items()},
             "events": self.events,
             "engine_type": self.engine_type,
+            "speech_level": round(self.speech_level, 4),
             "connected": self.connected,
         }
 
@@ -278,6 +292,8 @@ class AudioAnalyzer:
         mid = spec[(freqs >= 250) & (freqs < 2000)].sum() / total
         high = spec[(freqs >= 2000)].sum() / total
         res.bands = {"low": float(low), "mid": float(mid), "high": float(high)}
+        # speech proxy: loud + mid-band dominant (human voice ~250-2000 Hz)
+        res.speech_level = float(res.level * mid)
 
         if do_events:
             res.events = self._classify_events(res, spec, freqs)

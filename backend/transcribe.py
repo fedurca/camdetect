@@ -119,12 +119,14 @@ _DEMO_PHRASES = [
 
 class TranscriptionManager:
     def __init__(self, audio_manager, cfg, settings, mode: str = "live",
-                 db=None):
+                 db=None, locate_speaker=None):
         self.audio = audio_manager
         self.cfg = cfg
         self.settings = settings
         self.mode = mode
         self.db = db
+        # optional callback(cam_id, segment) -> {track_id, score, x, y} | None
+        self.locate_speaker = locate_speaker
         self.transcriber = Transcriber(cfg.language, cfg.model, cfg.diarization)
         self._results: dict[str, list[dict]] = {}
         self._lock = threading.Lock()
@@ -171,12 +173,21 @@ class TranscriptionManager:
                 segs = [s.to_dict() for s in self.transcriber.transcribe(samples, sr)]
 
             if segs:
+                for s in segs:
+                    # link the segment to the most likely person (variant 2)
+                    if self.locate_speaker is not None:
+                        loc = self.locate_speaker(cam_id, s)
+                        if loc:
+                            s["track_id"] = loc["track_id"]
+                            s["person"] = f"osoba #{loc['track_id']}"
+                            s["loc"] = {"x": loc.get("x"), "y": loc.get("y"),
+                                        "score": loc.get("score")}
+                    if self.db is not None:
+                        self.db.log_event("transcript", cam=cam_id,
+                                          label=s.get("person") or s.get("speaker"),
+                                          data=s)
                 with self._lock:
                     self._results[cam_id] = segs
-                if self.db is not None:
-                    for s in segs:
-                        self.db.log_event("transcript", cam=cam_id,
-                                          label=s.get("speaker"), data=s)
             self._stop.wait(seg_s)
 
     def _demo_segments(self) -> list[dict]:

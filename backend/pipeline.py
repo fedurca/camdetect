@@ -102,9 +102,14 @@ class Pipeline:
                                merge_time_s=cfg.database.merge_time_s,
                                retention_days=cfg.database.retention_days)
 
-        # Transcription (uses the audio ring buffers).
-        self.transcription = TranscriptionManager(self.audio, cfg.transcription,
-                                                  self.settings, mode=mode, db=self.db)
+        # Speaker->person linking (acoustic localization across the 3 mics).
+        self._cam_pos = {c.id: (c.world_xy[0], c.world_xy[1]) for c in cfg.cameras}
+        self._speech_by_obj: dict[int, dict] = {}
+
+        # Transcription (uses the audio ring buffers); links speakers to people.
+        self.transcription = TranscriptionManager(
+            self.audio, cfg.transcription, self.settings, mode=mode, db=self.db,
+            locate_speaker=self._locate_speaker)
 
         # Vehicle analyzer (ANPR + make/model) and recent observations buffer.
         self.vehicle = VehicleAnalyzer(cfg.vehicles.ocr_backend)
@@ -296,6 +301,7 @@ class Pipeline:
             if (self.settings.get("vehicles", "enabled", default=False)):
                 self._apply_vehicles(tracks)
             objs = [t.to_dict() for t in tracks]
+            self._attach_speech(objs)
             with self._lock:
                 self._objects = objs
             if self.db is not None and self.settings.get("database", "enabled", default=True):
@@ -359,6 +365,69 @@ class Pipeline:
                 t.make, t.model, t.vehicle_age, t.drivetrain = mk, md, ag, dt
                 if not t.plate:
                     t.plate = f"{t.id % 9 + 1}{chr(65 + t.id % 26)}{t.id % 9} {1000 + t.id % 9000}"
+
+    # -- speaker -> person linking (variant 2: acoustic localization) ------
+    def _locate_speaker(self, cam_id: str, segment: dict) -> Optional[dict]:
+        """Match a transcript segment to the most likely person track.
+
+        Uses the speech-band loudness measured at each of the three camera
+        microphones together with the known camera world positions: for each
+        candidate person we predict the per-camera loudness from inverse-square
+        distance and pick the person whose predicted pattern best matches the
+        observed one (cosine similarity). Also returns an energy-weighted source
+        position estimate. No sample-level sync needed - it is a level-pattern
+        localization, which is robust over independent RTSP audio streams.
+        """
+        audio = self.audio.results()
+        cams = [c.id for c in self.cfg.cameras]
+        e_obs = np.array([float(audio.get(c, {}).get("speech_level", 0.0)) for c in cams])
+        if e_obs.sum() <= 1e-6:
+            return None
+
+        with self._lock:
+            persons = [o for o in self._objects if o.get("class") == "person"]
+        if not persons:
+            return None
+
+        # energy-weighted source position estimate (for display/logging)
+        w = e_obs / e_obs.sum()
+        sx = sum(w[i] * self._cam_pos[c][0] for i, c in enumerate(cams))
+        sy = sum(w[i] * self._cam_pos[c][1] for i, c in enumerate(cams))
+
+        def cosine(a, b):
+            na, nb = np.linalg.norm(a), np.linalg.norm(b)
+            return float(a @ b / (na * nb)) if na > 1e-9 and nb > 1e-9 else 0.0
+
+        best, best_score = None, -1.0
+        for p in persons:
+            pred = np.array([1.0 / (((p["x"] - self._cam_pos[c][0]) ** 2 +
+                                     (p["y"] - self._cam_pos[c][1]) ** 2) + 1.0)
+                             for c in cams])
+            score = cosine(e_obs, pred)
+            if score > best_score:
+                best_score, best = score, p
+
+        if best is None or (len(persons) > 1 and best_score < 0.5):
+            return None
+
+        track_id = best["id"]
+        self._speech_by_obj[track_id] = {
+            "text": segment.get("text", ""),
+            "speaker": segment.get("speaker", "S1"),
+            "ts": time.time(),
+            "score": round(best_score, 2),
+        }
+        return {"track_id": track_id, "score": round(best_score, 2),
+                "x": round(sx, 2), "y": round(sy, 2)}
+
+    def _attach_speech(self, objs: list[dict], max_age_s: float = 6.0) -> None:
+        """Annotate object dicts with the latest transcript linked to them."""
+        now = time.time()
+        for o in objs:
+            sp = self._speech_by_obj.get(o["id"])
+            if sp and now - sp["ts"] <= max_age_s:
+                o["speech"] = sp["text"]
+                o["speaker"] = sp["speaker"]
 
     def _attach_engine_type(self, tracks) -> None:
         """Tag motorcycle/car tracks with the 2T/4T type from audio, if any."""
@@ -448,6 +517,7 @@ class Pipeline:
             if (self.settings.get("vehicles", "enabled", default=False)):
                 self._apply_demo_vehicles(tracks)
             objs = [tr.to_dict() for tr in tracks]
+            self._attach_speech(objs)
             with self._lock:
                 for cid, fr in frames.items():
                     self._annotated[cid] = _encode_jpeg(fr)
