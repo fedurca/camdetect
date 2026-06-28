@@ -2,6 +2,8 @@
 Description=camdetect multi-camera detection web app
 After=network-online.target
 Wants=network-online.target
+# Never give up restarting (disable the start-rate limit).
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -11,10 +13,9 @@ Environment=CAMDETECT_MODE=__MODE__
 Environment=HOST=0.0.0.0
 Environment=PORT=__PORT__
 ExecStart=__WORKDIR__/run.sh __MODE__
-# Auto-recovery: restart on any crash, keep retrying.
+# Auto-recovery: restart on any crash/exit, after a short delay.
 Restart=always
 RestartSec=5
-StartLimitIntervalSec=0
 KillMode=mixed
 TimeoutStopSec=20
 

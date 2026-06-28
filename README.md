@@ -209,16 +209,68 @@ plates, recent transcripts) plus a set of snapshot images. Snapshots are saved
 periodically to `data/report/<date>/` (`report.*` config); query via
 `GET /api/report?date=YYYY-MM-DD`.
 
-## Run as a service (systemd, autostart + auto-recovery)
+## Run as a systemd service (autostart on boot + auto-recovery)
+
+This installs camdetect as a system service that starts on boot and restarts
+automatically if it ever crashes. Files: [`deploy/camdetect.service`](deploy/camdetect.service)
+(unit template) and [`deploy/install-service.sh`](deploy/install-service.sh)
+(installer).
+
+1. Get the code onto the host and `cd` into it (e.g. `~/camdetect`). The
+   installer auto-creates the `.venv` and installs `requirements.txt` on first
+   run, so you don't have to set up the environment beforehand.
+
+2. (Optional) Validate first without root or making any changes - this renders
+   and checks the unit:
+
+```bash
+./deploy/install-service.sh --dry-run live 8000
+```
+
+3. Install and start it (needs `sudo`; arguments are `MODE PORT`,
+   default `live 8000`):
 
 ```bash
 sudo ./deploy/install-service.sh live 8000
+# demo mode (no cameras) on a custom port:
+# sudo ./deploy/install-service.sh demo 9000
 ```
 
-Installs `camdetect.service` (enabled on boot, `Restart=always` for crash
-recovery). Manage with `systemctl status|restart camdetect` and
-`journalctl -u camdetect -f`. Uninstall:
-`sudo systemctl disable --now camdetect && sudo rm /etc/systemd/system/camdetect.service`.
+   What it does: renders `/etc/systemd/system/camdetect.service` with your repo
+   path and user, `systemctl daemon-reload`, `enable` (autostart on boot) and
+   `restart` (start now). The unit sets `Restart=always` with
+   `StartLimitIntervalSec=0`, so it keeps recovering from crashes indefinitely;
+   it also binds the web UI to all interfaces (`HOST=0.0.0.0`).
+
+4. Verify it is running and reachable:
+
+```bash
+systemctl status camdetect           # should be "active (running)"
+journalctl -u camdetect -f           # live logs; prints the access URLs
+curl -sI http://localhost:8000/      # 200 OK
+```
+
+   Open `http://<host-ip>:8000` from another machine on the LAN. If a firewall
+   is enabled: `sudo ufw allow 8000/tcp`.
+
+Manage / update / uninstall:
+
+```bash
+sudo systemctl restart camdetect     # after editing config.yaml
+sudo systemctl stop camdetect
+git pull && sudo ./deploy/install-service.sh live 8000   # update + restart
+sudo systemctl disable --now camdetect
+sudo rm /etc/systemd/system/camdetect.service && sudo systemctl daemon-reload
+```
+
+GPU notes: the service runs `run.sh`, which uses the venv and `config.yaml`, so
+GPU settings (`detection.device: auto`, per-camera `device: cuda:N`, larger
+models, drone/transcription toggles) all apply. Test that the crash you saw is
+gone by tuning in the Benchmark tab while the service runs.
+
+Troubleshooting: `systemctl status camdetect` and `journalctl -u camdetect -e`
+show why it failed. A first start can take a while if dependencies are still
+installing; the service will keep retrying until ready.
 
 ## Duplicate-detection handling
 
