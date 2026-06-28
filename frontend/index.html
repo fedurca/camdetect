@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>camdetect - multi-camera 3D detection</title>
+  <link rel="stylesheet" href="/style.css" />
+  <!-- Three.js via import map (ES modules) -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <header id="topbar">
+    <span class="title">camdetect</span>
+    <span id="mode" class="badge">--</span>
+    <span id="conn" class="badge badge-off">connecting…</span>
+    <span id="objcount" class="badge">0 objects</span>
+    <span class="spacer"></span>
+    <span id="legend" class="legend"></span>
+  </header>
+
+  <main id="grid">
+    <section class="panel" id="panel-cam2">
+      <div class="panel-head"><span class="dot" data-cam="cam2"></span> cam2</div>
+      <img class="stream" data-cam="cam2" alt="cam2 stream" />
+    </section>
+    <section class="panel" id="panel-cam3">
+      <div class="panel-head"><span class="dot" data-cam="cam3"></span> cam3</div>
+      <img class="stream" data-cam="cam3" alt="cam3 stream" />
+    </section>
+    <section class="panel" id="panel-cam4">
+      <div class="panel-head"><span class="dot" data-cam="cam4"></span> cam4</div>
+      <img class="stream" data-cam="cam4" alt="cam4 stream" />
+    </section>
+    <section class="panel" id="panel-3d">
+      <div class="panel-head">3D detected objects
+        <span class="hint">drag to orbit · scroll to zoom</span>
+      </div>
+      <div id="scene"></div>
+      <canvas id="minimap" width="220" height="170"></canvas>
+    </section>
+  </main>
+
+  <script type="module" src="/main.js"></script>
+</body>
+</html>

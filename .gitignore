@@ -4,3 +4,26 @@ ssh/*_rsa
 ssh/*_ed25519
 ssh/*_ecdsa
 !ssh/*.pub
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Model weights (downloaded at runtime)
+*.pt
+*.onnx
+*.engine
+!ssh/*.pub
+
+# Runtime artifacts
+*.log
+data/snapshots/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
