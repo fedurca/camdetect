@@ -140,6 +140,27 @@ def api_benchmark() -> JSONResponse:
     return JSONResponse(pipeline.benchmark())
 
 
+@app.get("/api/history/objects")
+def api_history_objects(limit: int = 200, cls: str | None = None) -> JSONResponse:
+    if pipeline is None or pipeline.db is None:
+        return JSONResponse({"objects": []})
+    return JSONResponse({"objects": pipeline.db.list_objects(limit=limit, cls=cls)})
+
+
+@app.get("/api/history/events")
+def api_history_events(limit: int = 200, kind: str | None = None) -> JSONResponse:
+    if pipeline is None or pipeline.db is None:
+        return JSONResponse({"events": []})
+    return JSONResponse({"events": pipeline.db.list_events(limit=limit, kind=kind)})
+
+
+@app.get("/api/history/stats")
+def api_history_stats() -> JSONResponse:
+    if pipeline is None or pipeline.db is None:
+        return JSONResponse({"objects": 0, "events": 0, "by_class": {}})
+    return JSONResponse(pipeline.db.stats())
+
+
 @app.get("/api/state")
 def api_state() -> JSONResponse:
     if pipeline is None:
