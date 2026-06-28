@@ -175,7 +175,15 @@ function makeObject(o) {
   const label = labelSprite(objectLabel(o), colorFor(o.class));
   label.position.y = h + 0.6; group.add(label);
   scene.add(group);
-  return { group, box, label, class: o.class, text: objectLabel(o) };
+
+  // drones get a trajectory polyline in world coordinates (absolute)
+  let trail = null;
+  if (o.class === "drone") {
+    trail = new THREE.Line(new THREE.BufferGeometry(),
+      new THREE.LineBasicMaterial({ color: hexColor(o.class) }));
+    scene.add(trail);
+  }
+  return { group, box, label, trail, class: o.class, text: objectLabel(o) };
 }
 
 function updateObjects(objects) {
@@ -197,9 +205,18 @@ function updateObjects(objects) {
     }
     const p = worldToScene(o.x, o.y, 0);
     e.group.position.set(p.x, 0, p.z);
+    // update drone trajectory (drawn at a small altitude)
+    if (e.trail && o.trail && o.trail.length > 1) {
+      e.trail.geometry.setFromPoints(
+        o.trail.map(([x, y]) => worldToScene(x, y, 1.2)));
+    }
   }
   for (const [id, e] of objectMeshes) {
-    if (!seen.has(id)) { scene.remove(e.group); objectMeshes.delete(id); }
+    if (!seen.has(id)) {
+      scene.remove(e.group);
+      if (e.trail) scene.remove(e.trail);
+      objectMeshes.delete(id);
+    }
   }
 }
 
@@ -276,6 +293,17 @@ function drawTopdown() {
     tdx.moveTo(px, py - 6); tdx.lineTo(px - 5, py + 5); tdx.lineTo(px + 5, py + 5);
     tdx.closePath(); tdx.fill();
     tdx.fillStyle = "#94a3b8"; tdx.font = "10px sans-serif"; tdx.fillText(c.id, px + 7, py + 4);
+  }
+  // drone trajectories
+  for (const o of latestObjects) {
+    if (o.class !== "drone" || !o.trail || o.trail.length < 2) continue;
+    tdx.strokeStyle = cssColor(o.class, 0.7); tdx.lineWidth = 1.5;
+    tdx.beginPath();
+    o.trail.forEach(([x, y], i) => {
+      const [tx, ty] = tdPt(x, y);
+      if (i === 0) tdx.moveTo(tx, ty); else tdx.lineTo(tx, ty);
+    });
+    tdx.stroke();
   }
   // objects
   for (const o of latestObjects) {
@@ -633,6 +661,8 @@ const els = {
   audioEnabled: "set-audio-enabled", audioEvents: "set-audio-events",
   audioEngine: "set-audio-engine", audioWindow: "set-audio-window", audioHop: "set-audio-hop",
   trEnabled: "set-tr-enabled", trDiar: "set-tr-diar", trRecord: "set-tr-record",
+  droneEnabled: "set-drone-enabled", droneVisual: "set-drone-visual",
+  droneAudio: "set-drone-audio", droneFuse: "set-drone-fuse", droneSens: "set-drone-sens",
 };
 const $ = (id) => document.getElementById(id);
 
@@ -657,6 +687,14 @@ function applySettingsToControls(s) {
   $(els.trEnabled).checked = s.transcription.enabled;
   $(els.trDiar).checked = s.transcription.diarization;
   $(els.trRecord).checked = s.transcription.record;
+  if (s.drone) {
+    $(els.droneEnabled).checked = s.drone.enabled;
+    $(els.droneVisual).checked = s.drone.visual;
+    $(els.droneAudio).checked = s.drone.audio;
+    $(els.droneFuse).checked = s.drone.fuse;
+    $(els.droneSens).value = s.drone.sensitivity;
+    $("val-drone-sens").textContent = s.drone.sensitivity;
+  }
 }
 
 function collectSettings() {
@@ -690,6 +728,13 @@ function collectSettings() {
       diarization: $(els.trDiar).checked,
       record: $(els.trRecord).checked,
     },
+    drone: {
+      enabled: $(els.droneEnabled).checked,
+      visual: $(els.droneVisual).checked,
+      audio: $(els.droneAudio).checked,
+      fuse: $(els.droneFuse).checked,
+      sensitivity: parseFloat($(els.droneSens).value),
+    },
   };
 }
 
@@ -699,6 +744,7 @@ async function pushSettings() {
   $("val-video-conf").textContent = patch.video.confidence;
   $("val-audio-window").textContent = patch.audio.window_s;
   $("val-audio-hop").textContent = patch.audio.hop_s;
+  $("val-drone-sens").textContent = patch.drone.sensitivity;
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(patch));
   try {
     await fetch("/api/settings", {
