@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from . import logging_setup
 from .classes import CLASS_COLORS, CLASS_LABELS_CS
 from .config import PROJECT_ROOT, load_config
-from .geometry import build_intrinsics
+from .geometry import build_intrinsics, camera_coverage
 from .logging_setup import set_level, setup_logging
 from .pipeline import Pipeline
 from .settings import Settings
@@ -72,6 +72,7 @@ def api_config() -> JSONResponse:
             }
             for c in cfg.cameras
         ],
+        "coverage": camera_coverage(cfg.cameras, cfg.intrinsics.fov_horizontal_deg),
         "world": {
             "reference_edge_m": cfg.world.reference_edge_m,
             "ground_elevation_m": cfg.world.ground_elevation_m,

@@ -15,6 +15,48 @@ import numpy as np
 from .config import IntrinsicsConfig
 
 
+def camera_coverage(cameras, default_fov_deg: float) -> dict:
+    """Per-camera ground coverage wedge.
+
+    Returns ``{cam_id: {x, y, azimuth_deg, fov_deg, range_m}}`` where the look
+    azimuth is taken from config when given, otherwise derived to point from the
+    camera toward the centroid of all cameras (they all watch the shared area).
+    Azimuth is degrees CCW from world +X (east).
+    """
+    if not cameras:
+        return {}
+    cx = sum(c.world_xy[0] for c in cameras) / len(cameras)
+    cy = sum(c.world_xy[1] for c in cameras) / len(cameras)
+    out: dict = {}
+    for c in cameras:
+        x, y = c.world_xy
+        if c.azimuth_deg is not None:
+            az = float(c.azimuth_deg)
+        else:
+            az = math.degrees(math.atan2(cy - y, cx - x))
+        out[c.id] = {
+            "x": x, "y": y,
+            "azimuth_deg": az,
+            "fov_deg": float(c.fov_deg) if c.fov_deg else float(default_fov_deg),
+            "range_m": float(c.range_m),
+        }
+    return out
+
+
+def in_coverage(cov: dict, X: float, Y: float, fov_margin_deg: float = 12.0,
+                range_margin: float = 1.3) -> bool:
+    """True if world point (X, Y) is inside the camera's coverage wedge."""
+    dx, dy = X - cov["x"], Y - cov["y"]
+    dist = math.hypot(dx, dy)
+    if dist > cov["range_m"] * range_margin:
+        return False
+    if dist < 1e-3:
+        return True
+    ang = math.degrees(math.atan2(dy, dx))
+    diff = abs((ang - cov["azimuth_deg"] + 180.0) % 360.0 - 180.0)
+    return diff <= cov["fov_deg"] / 2.0 + fov_margin_deg
+
+
 def build_intrinsics(intr: IntrinsicsConfig) -> np.ndarray:
     """Return the 3x3 camera matrix K derived from FOV + resolution.
 

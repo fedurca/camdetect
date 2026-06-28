@@ -93,22 +93,37 @@ world:
 # Cameras
 # world_xy / height_m are filled in during calibration (Google Earth vertices).
 # ---------------------------------------------------------------------------
+#
+# Coverage: from the UniFi Protect coverage map (3D plan view). cam2 faces the
+# garage gate; cam3 sits to the left of the gate (from cam2's view) and cam4 to
+# the right of cam2's view. azimuth_deg is the look direction CCW from +X (east);
+# leave null to auto-aim each camera at the camera-cluster centroid. fov_deg
+# defaults to the lens H-FOV (84.4); range_m is the useful coverage distance.
 cameras:
   - id: "cam2"
     url: "rtsp://10.24.0.1:7447/xZKYcjSJaXphYyGh"
     device: null        # null -> use detection.device
     world_xy: [0.0, 0.0]
     height_m: 3.0
+    azimuth_deg: null    # faces the garage gate; set from the UniFi coverage map
+    fov_deg: 84.4
+    range_m: 25.0
   - id: "cam3"
     url: "rtsp://10.24.0.1:7447/7rn46ON9DHj3foCA"
     device: null
     world_xy: [14.6, 0.0]
     height_m: 3.0
+    azimuth_deg: null    # left of the gate (from cam2's view)
+    fov_deg: 84.4
+    range_m: 25.0
   - id: "cam4"
     url: "rtsp://10.24.0.1:7447/ju7y75gaii2ME5TM"
     device: null
     world_xy: [7.3, 8.0]
     height_m: 3.0
+    azimuth_deg: null    # right of cam2's view
+    fov_deg: 84.4
+    range_m: 25.0
 
 # ---------------------------------------------------------------------------
 # Fusion / tracking (world coordinates, meters)

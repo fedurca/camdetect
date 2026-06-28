@@ -77,6 +77,14 @@ class CameraConfig:
     device: Optional[str] = None
     world_xy: tuple[float, float] = (0.0, 0.0)
     height_m: float = 3.0
+    # Coverage (from the UniFi Protect coverage map). azimuth_deg is the look
+    # direction measured CCW from world +X (east); null -> auto toward the
+    # camera-cluster centroid. fov_deg defaults to the lens H-FOV. range_m is the
+    # useful coverage distance. Used for the coverage overlay and to reject
+    # detections projected outside a camera's real field of view.
+    azimuth_deg: Optional[float] = None
+    fov_deg: Optional[float] = None
+    range_m: float = 25.0
 
 
 @dataclass
@@ -227,6 +235,9 @@ def load_config(path: str = DEFAULT_CONFIG_PATH) -> Config:
                 device=cam.get("device"),
                 world_xy=tuple(cam.get("world_xy", (0.0, 0.0))),  # type: ignore[arg-type]
                 height_m=float(cam.get("height_m", 3.0)),
+                azimuth_deg=cam.get("azimuth_deg"),
+                fov_deg=cam.get("fov_deg"),
+                range_m=float(cam.get("range_m", 25.0)),
             )
         )
 

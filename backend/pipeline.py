@@ -31,6 +31,7 @@ from .db import Database
 from .detector import (Detection, Detector, OpenVocabDetector, merge_detections,
                        resolve_device)
 from .fusion import Fusion, WorldDetection
+from .geometry import camera_coverage, in_coverage
 from .recorder import RecordingManager
 from .settings import Settings
 from .transcribe import TranscriptionManager
@@ -106,6 +107,10 @@ class Pipeline:
         # Speaker->person linking (acoustic localization across the 3 mics).
         self._cam_pos = {c.id: (c.world_xy[0], c.world_xy[1]) for c in cfg.cameras}
         self._speech_by_obj: dict[int, dict] = {}
+
+        # Camera coverage wedges (from the UniFi coverage map) - used to reject
+        # detections projected outside a camera's real field of view.
+        self._coverage = camera_coverage(cfg.cameras, cfg.intrinsics.fov_horizontal_deg)
 
         # Transcription (uses the audio ring buffers); links speakers to people.
         self.transcription = TranscriptionManager(
@@ -270,6 +275,12 @@ class Pipeline:
                 if calib is not None:
                     fx, fy = d.foot_point
                     X, Y = calib.image_to_world(fx, fy, (w, h))
+                    cov = self._coverage.get(cam_id)
+                    # Reject projections that fall outside this camera's real
+                    # coverage wedge (usually a homography/labeling error) -
+                    # improves cross-camera fusion precision.
+                    if cov is not None and not in_coverage(cov, X, Y):
+                        continue
                     world.append(WorldDetection(cam_id, d.class_id, d.class_name,
                                                 d.confidence, X, Y))
                     if veh.get("enabled") and d.class_name in VEHICLE_CLASSES:
