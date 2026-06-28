@@ -10,11 +10,19 @@ from __future__ import annotations
 
 import math
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from itertools import count
 from typing import Optional
 
 from .classes import height_for
+
+# Speed thresholds (m/s) used to classify person behavior.
+WALK_SPEED = 0.4
+RUN_SPEED = 2.2
+# A person present this long with little net displacement is "loitering".
+LOITER_TIME_S = 15.0
+LOITER_RADIUS_M = 2.0
 
 
 @dataclass
@@ -40,10 +48,51 @@ class Track:
     height: float
     cameras: list[str] = field(default_factory=list)
     last_update: float = field(default_factory=time.time)
+    first_seen: float = field(default_factory=time.time)
     hits: int = 0
+    # motion / attributes
+    history: deque = field(default_factory=lambda: deque(maxlen=64))
+    speed: float = 0.0
+    behavior: Optional[str] = None
+    age: Optional[str] = None          # experimental, from attributes module
+    age_conf: float = 0.0
+    engine_type: Optional[str] = None  # 2T / 4T / unknown (from audio)
+
+    def update_motion(self, now: float) -> None:
+        """Recompute speed and behavior from recent history."""
+        self.history.append((now, self.x, self.y))
+        # speed over a ~1s window
+        ref = None
+        for t, x, y in self.history:
+            if now - t <= 1.0:
+                ref = (t, x, y)
+                break
+        if ref is not None and now - ref[0] > 1e-3:
+            self.speed = _dist(self.x, self.y, ref[1], ref[2]) / (now - ref[0])
+        self.behavior = self._classify_behavior(now)
+
+    def _classify_behavior(self, now: float) -> Optional[str]:
+        if self.class_name == "person":
+            if self.speed > RUN_SPEED:
+                return "running"
+            if self.speed > WALK_SPEED:
+                return "walking"
+            # standing for a while in a small area -> loitering
+            if now - self.first_seen > LOITER_TIME_S:
+                xs = [p[1] for p in self.history]
+                ys = [p[2] for p in self.history]
+                if xs and (max(xs) - min(xs)) < LOITER_RADIUS_M and \
+                        (max(ys) - min(ys)) < LOITER_RADIUS_M:
+                    return "loitering"
+            return "standing"
+        # vehicles / other: coarse moving vs stopped
+        if self.class_name in ("car", "motorcycle", "truck", "bus", "bicycle",
+                               "scooter"):
+            return "moving" if self.speed > WALK_SPEED else "stopped"
+        return None
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "id": self.id,
             "class": self.class_name,
             "class_id": self.class_id,
@@ -52,7 +101,16 @@ class Track:
             "height": round(self.height, 2),
             "prob": round(self.confidence, 3),
             "cameras": self.cameras,
+            "speed": round(self.speed, 2),
         }
+        if self.behavior:
+            d["behavior"] = self.behavior
+        if self.age:
+            d["age"] = self.age
+            d["age_conf"] = round(self.age_conf, 2)
+        if self.engine_type:
+            d["engine_type"] = self.engine_type
+        return d
 
 
 def _dist(ax: float, ay: float, bx: float, by: float) -> float:
@@ -137,10 +195,11 @@ class Fusion:
                 t.cameras = cluster.cameras
                 t.last_update = now
                 t.hits += 1
+                t.update_motion(now)
                 unmatched.discard(best_id)
             else:
                 tid = next(self._ids)
-                self.tracks[tid] = Track(
+                track = Track(
                     id=tid,
                     class_name=cluster.class_name,
                     class_id=cluster.class_id,
@@ -150,8 +209,11 @@ class Fusion:
                     height=height_for(cluster.class_name, self.default_height_m),
                     cameras=cluster.cameras,
                     last_update=now,
+                    first_seen=now,
                     hits=1,
                 )
+                track.update_motion(now)
+                self.tracks[tid] = track
 
         # -- step 3: drop stale tracks ------------------------------------
         for tid in list(self.tracks.keys()):
