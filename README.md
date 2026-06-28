@@ -6,15 +6,40 @@ people / vehicles / animals with YOLO, localizes each detection on a shared
 metric ground plane, fuses detections seen by multiple cameras into single
 tracked objects, and shows everything in a browser:
 
-- three live video panels with detection overlays (class, track ID, probability),
-- a 4th panel with a 3D scene of the detected objects on the courtyard ground,
-  color-coded by class, plus camera positions and a top-down minimap.
+- three live video panels with detection overlays (class, track ID, probability) -
+  hideable, hidden by default,
+- a 3D scene of the detected objects on the courtyard ground, color-coded by class,
+- a dedicated top-down (plan) view, and
+- an audio panel with a live spectrogram, frequency analysis, and sound events.
+
+Both video and audio detection are independently toggleable and tunable (CPU
+load / frame rate) from the in-app settings drawer.
 
 ```
- cam2 ─┐
- cam3 ─┼─▶ YOLO ─▶ image→ground homography ─▶ fusion/tracking ─▶ WebSocket ─▶ 3D UI
- cam4 ─┘                                                        └▶ MJPEG ─▶ video panels
+ cam2 ─┬─ video ─▶ YOLO (+ YOLO-World) ─▶ ground homography ─▶ fusion/tracking ─┐
+ cam3 ─┤                                                                        ├▶ WS ─▶ 3D + top-down
+ cam4 ─┘─ audio ─▶ spectrogram + events + 2T/4T ───────────────────────────────┘     └▶ MJPEG panels
 ```
+
+## Detection (video)
+
+- Known classes via a COCO model (`yolo11n`): person, car, motorcycle, bicycle,
+  dog, cat, bird, ...
+- Rare classes via an optional open-vocabulary detector (YOLO-World) driven by
+  text prompts: trash bin (popelnice), kick scooter (koloberka), roller skates
+  (brusle), drone (dron). Heavy on CPU, so OFF by default; recommended for the GPU rig.
+- Per-person attributes: behavior from motion (standing/walking/running/loitering)
+  and an experimental, off-by-default age estimate (needs a visible face; these
+  overhead cameras rarely provide one, so treat as experimental).
+
+## Detection (audio)
+
+Audio is part of each camera's RTSP stream. The audio subsystem computes a live
+log spectrogram and frequency analysis (dominant frequency, low/mid/high band
+energy, level), and derives sound events with a light heuristic classifier
+(engine, drone, bark, speech, loud). An experimental 2-stroke vs 4-stroke engine
+classifier inspects the low-frequency harmonic structure and tags nearby
+motorcycle/car tracks. A heavy event model can be enabled later (GPU).
 
 ## How localization works
 
@@ -30,6 +55,7 @@ analytically from the identical G5 Bullet FOV (84.4° × 45.4°) and 2K resoluti
 ## Requirements
 
 - Python 3.11+ (tested on 3.12)
+- `ffmpeg` on PATH (used to pull the audio track from each RTSP stream).
 - The local machine. CPU-only works (small model, low FPS); a CUDA GPU is used
   automatically when available. Multi-GPU is config-driven (see below).
 - Network access to the cameras at `rtsp://10.24.0.1:7447/...`.
@@ -92,19 +118,34 @@ Everything lives in [`config.yaml`](config.yaml):
 
 - `cameras` — RTSP URLs, per-camera world position / height, optional per-camera
   `device` (e.g. `cuda:0`).
-- `detection` — model, device (`auto`/`cpu`/`cuda:0`), `imgsz`, confidence, target
-  `fps`, and the COCO `classes` to keep (people, vehicles, animals).
+- `detection` — `enabled`, model, device (`auto`/`cpu`/`cuda:0`), `imgsz`,
+  confidence, target `fps`, the COCO `classes`, `open_vocabulary` (YOLO-World
+  model + prompts), and `attributes` (behavior, age).
+- `audio` — `enabled`, sample rate, analysis `window_s`/`hop_s`, spectrogram size,
+  `engine_2t4t`, and the heavy `events` model toggle.
 - `intrinsics` — camera resolution and FOV (used to build `K`).
 - `world` — the 14.6 m reference edge and ground elevation.
 - `fusion` — merge distance, track max age, smoothing, default object height.
 
+Most of these are also adjustable live from the in-app settings drawer (gear in
+the top bar); changes are POSTed to `/api/settings`, applied immediately, and
+remembered in the browser via `localStorage`.
+
+### Runtime controls (settings drawer)
+
+- Camera previews: on/off (hidden by default).
+- Video detection: on/off, FPS, resolution, confidence, open-vocabulary on/off + prompts.
+- Person attributes: behavior on/off, age on/off (experimental).
+- Audio detection: on/off, event model on/off, 2T/4T on/off, window/hop.
+
 ### CPU now, multi-GPU later
 
-The current default is CPU-friendly: `model: models/yolo11n.pt`, `imgsz: 960`,
-`fps: 3`. When you move to the multi-NVIDIA box, no code changes are needed:
+Defaults are CPU-friendly: COCO `yolo11n` at `imgsz 960`, `fps 3`, open-vocabulary
+OFF, audio spectrogram + frequency analysis + 2T/4T ON (cheap), audio event model
+OFF, age OFF. When you move to the multi-NVIDIA box, no code changes are needed:
 
 - set `detection.model` to a larger model (e.g. `yolo11m.pt` / `yolo11l.pt`),
-- raise `detection.fps`,
+- raise `detection.fps`, enable `open_vocabulary`, enable `audio.events` and `age`,
 - optionally pin cameras to GPUs via each camera's `device: "cuda:N"`
   (the pipeline builds one detector per distinct device).
 
@@ -149,11 +190,14 @@ backend/
   app.py                 # FastAPI: UI, MJPEG streams, /api/*, WebSocket
   pipeline.py            # capture -> detect -> localize -> fuse orchestration
   cameras.py             # threaded RTSP capture (TCP, auto-reconnect)
-  detector.py            # YOLO wrapper, device auto-detect
+  detector.py            # YOLO + YOLO-World wrappers, device auto-detect
+  audio.py               # audio capture, spectrogram, events, 2T/4T
+  attributes.py          # experimental age estimation (optional)
+  settings.py            # thread-safe runtime settings store
   calibration.py         # load/apply homographies (image -> world)
   geometry.py            # intrinsics K, scaling, solvePnP extrinsics
-  fusion.py              # cross-camera merge + tracking
-  classes.py             # class names, colors, heights
+  fusion.py              # cross-camera merge + tracking + behavior
+  classes.py             # class names, colors, heights, Czech labels
   config.py              # config loader
   check_streams.py       # RTSP connectivity test
 calibrate/
@@ -161,8 +205,8 @@ calibrate/
   points.example.json    # correspondence file schema + example
 data/calibration/        # per-camera calibration JSON
 frontend/
-  index.html style.css   # 2x2 grid UI
-  main.js                # Three.js scene + WebSocket + minimap
+  index.html style.css   # settings drawer + cameras + 3D + top-down + audio
+  main.js                # Three.js scene, top-down, audio panel, settings
   colors.js              # shared class -> color map
 models/                  # YOLO weights (auto-downloaded, gitignored)
 ```
@@ -170,10 +214,12 @@ models/                  # YOLO weights (auto-downloaded, gitignored)
 ## API
 
 - `GET /` — the web UI.
-- `GET /api/config` — cameras, world frame, intrinsics, class colors, mode.
-- `GET /api/state` — current fused objects + camera status (JSON snapshot).
+- `GET /api/config` — cameras, world frame, intrinsics, class colors, Czech labels, mode.
+- `GET /api/settings` / `POST /api/settings` — read / live-update runtime settings.
+- `GET /api/state` — fused objects (+ behavior/age/engine), camera status, audio results.
 - `GET /stream/{cam}` — annotated MJPEG video stream.
-- `WS /ws` — pushes `{objects: [...], cameras: {...}}` ~10×/s.
+- `GET /audio/{cam}/spectrogram` — MJPEG spectrogram stream.
+- `WS /ws` — pushes `{objects: [...], cameras: {...}, audio: {...}}` ~10×/s.
 
 ## Validation
 
