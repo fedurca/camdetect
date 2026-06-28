@@ -1,0 +1,4 @@
+# Public keys allowed to SSH into this workspace machine.
+# Add your own key with: ssh/setup.sh --add-key ~/.ssh/id_ed25519.pub
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPqiJsBjAsv4KymedFcUR891X1lgC90DW8yMtjcHJ/p0
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGeLRVs/F0SYpyiQwMs/X/VkNNSsRU5NzKmiDTAYpqoq camdetect-workspace@cursor
