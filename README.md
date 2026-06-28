@@ -156,6 +156,21 @@ Set `azimuth_deg`/`range_m` per camera from the UniFi coverage map for the most
 accurate wedges (cam2 faces the garage gate, cam3 is to its left, cam4 to its
 right).
 
+## Drone detection mode
+
+A dedicated drone pipeline, toggled with a single switch ("Zapnout detekci dronu"
+in the settings drawer) plus deeper tuning (`drone.*` in `config.yaml`):
+
+- **Visual tracking**: open-vocabulary (YOLO-World) drone prompts at a
+  sensitivity-driven (low) confidence so small/distant drones are caught.
+- **Audio**: high-frequency buzz detection from the camera microphones.
+- **Fusion**: when both fire, the drone track is marked `sources: [visual, audio]`.
+- **Sensitivity** slider lowers the visual/audio thresholds.
+- Drones confirm from a **single** (sky-facing) camera (`drone.min_cameras: 1`),
+  unlike ground objects, and use a small merge radius so **two drones stay
+  separate**.
+- Each drone draws a **trajectory** trail in the 3D scene and the top-down view.
+
 ## Fewer false positives (multi-camera confirmation)
 
 To suppress spurious detections when "nothing is happening", an object is only
@@ -170,6 +185,15 @@ When CUDA is available the detectors are spread across **all GPUs round-robin**
 (camera -> `cuda:0`, `cuda:1`, ...) automatically when `detection.device: auto`;
 pin explicitly per camera with `device: "cuda:N"`. The Czech transcription model
 also runs on GPU. Verify in the Benchmark tab and `nvidia-smi`.
+
+## Robustness
+
+YOLO/torch models are not safe for concurrent `predict()` on one instance, so
+all inference (camera threads and the benchmark) is serialized per detector with
+a lock, and the benchmark reuses an already-loaded detector instead of building a
+second model in the request thread - this fixed a segfault seen when running the
+benchmark while detection was active. CPU thread count is also capped to avoid
+OpenMP oversubscription.
 
 ## Version
 
