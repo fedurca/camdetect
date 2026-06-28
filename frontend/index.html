@@ -20,13 +20,16 @@
     <span id="mode" class="badge">--</span>
     <span id="conn" class="badge badge-off">pripojuji…</span>
     <span id="objcount" class="badge">0 objektu</span>
+    <span id="ver" class="badge">--</span>
     <nav id="tabs">
       <button class="tab-btn active" data-tab="live">Zive</button>
       <button class="tab-btn" data-tab="history">Historie</button>
+      <button class="tab-btn" data-tab="report">Report</button>
       <button class="tab-btn" data-tab="benchmark">Benchmark</button>
       <button class="tab-btn" data-tab="debug">Debug</button>
     </nav>
     <button id="btn-cameras" class="toolbtn">Nahledy kamer</button>
+    <button id="btn-audio" class="toolbtn active">Zvuk</button>
     <button id="btn-settings" class="toolbtn">Nastaveni</button>
     <span class="spacer"></span>
     <span id="legend" class="legend"></span>
@@ -45,6 +48,11 @@
         </select>
       </label>
       <label class="row">Prah <input type="range" id="set-video-conf" min="0.1" max="0.9" step="0.05" /><span id="val-video-conf" class="val"></span></label>
+      <label class="row">Min. kamer (potvrzeni)
+        <select id="set-min-cams">
+          <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+        </select>
+      </label>
       <label class="row"><input type="checkbox" id="set-ov-enabled" /> Open-vocabulary</label>
       <label class="col">Prompty:<textarea id="set-ov-prompts" rows="2"></textarea></label>
     </div>
@@ -125,6 +133,19 @@
         <span id="rec-status" class="muted"></span>
       </div>
       <table id="rec-list"><thead><tr><th>Soubor</th><th>Velikost</th><th>Stav</th><th></th></tr></thead><tbody></tbody></table>
+    </div>
+  </section>
+
+  <!-- ===== REPORT ===== -->
+  <section id="view-report" class="view hidden">
+    <div class="hist-toolbar">
+      <input type="date" id="report-date" />
+      <button id="report-load" class="toolbtn">Nacist denni report</button>
+      <span class="muted">souhrn co se na kamerach delo (text + obrazky)</span>
+    </div>
+    <div class="report-cols">
+      <pre id="report-text" class="bench-result">Vyber datum a nacti report.</pre>
+      <div id="report-images" class="report-images"></div>
     </div>
   </section>
 

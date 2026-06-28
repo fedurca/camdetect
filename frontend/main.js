@@ -402,15 +402,36 @@ function switchTab(tab) {
   activeTab = tab;
   document.querySelectorAll(".tab-btn").forEach((b) =>
     b.classList.toggle("active", b.dataset.tab === tab));
-  for (const v of ["live", "history", "benchmark", "debug"]) {
+  for (const v of ["live", "history", "report", "benchmark", "debug"]) {
     document.getElementById(`view-${v}`).classList.toggle("hidden", v !== tab);
   }
   if (tab === "live") setTimeout(resize, 50);
   if (tab === "history") { loadHistory(); loadRecordings(); }
+  if (tab === "report") loadReport();
   if (debugTimer) { clearInterval(debugTimer); debugTimer = null; }
   if (tab === "debug") {
     pollLogs(); pollEvents();
     debugTimer = setInterval(() => { pollLogs(); pollEvents(); }, 1000);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Daily report
+// ---------------------------------------------------------------------------
+async function loadReport() {
+  const dateEl = document.getElementById("report-date");
+  if (!dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
+  const date = dateEl.value;
+  try {
+    const r = await fetch(`/api/report?date=${date}`).then((x) => x.json());
+    document.getElementById("report-text").textContent = r.text || "(prazdne)";
+    const grid = document.getElementById("report-images");
+    grid.innerHTML = (r.images || []).map((name) =>
+      `<figure style="margin:0"><img loading="lazy" src="/report-image/${date}/${name}" />` +
+      `<figcaption class="cap">${name}</figcaption></figure>`).join("") ||
+      '<div class="muted">Zadne snimky pro tento den.</div>';
+  } catch (e) {
+    document.getElementById("report-text").textContent = "Chyba nacitani reportu.";
   }
 }
 
@@ -564,6 +585,7 @@ function wireExtraControls() {
   document.getElementById("bench-run").addEventListener("click", runBenchmark);
   document.getElementById("bench-save").addEventListener("click", saveStartup);
   document.getElementById("rec-start").addEventListener("click", startRecording);
+  document.getElementById("report-load").addEventListener("click", loadReport);
   document.getElementById("debug-level").addEventListener("change", async (e) => {
     await fetch("/api/log-level", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -606,7 +628,7 @@ let settings = null;
 const els = {
   videoEnabled: "set-video-enabled", videoFps: "set-video-fps", videoImgsz: "set-video-imgsz",
   videoConf: "set-video-conf", ovEnabled: "set-ov-enabled", ovPrompts: "set-ov-prompts",
-  attrBehavior: "set-attr-behavior", attrAge: "set-attr-age",
+  attrBehavior: "set-attr-behavior", attrAge: "set-attr-age", minCams: "set-min-cams",
   vehEnabled: "set-veh-enabled", vehPlates: "set-veh-plates", vehMakeModel: "set-veh-makemodel",
   audioEnabled: "set-audio-enabled", audioEvents: "set-audio-events",
   audioEngine: "set-audio-engine", audioWindow: "set-audio-window", audioHop: "set-audio-hop",
@@ -621,6 +643,7 @@ function applySettingsToControls(s) {
   $(els.videoConf).value = s.video.confidence; $("val-video-conf").textContent = s.video.confidence;
   $(els.ovEnabled).checked = s.video.open_vocabulary.enabled;
   $(els.ovPrompts).value = (s.video.open_vocabulary.prompts || []).join(", ");
+  if (s.video.min_cameras) $(els.minCams).value = String(s.video.min_cameras);
   $(els.attrBehavior).checked = s.attributes.behavior;
   $(els.attrAge).checked = s.attributes.age;
   $(els.vehEnabled).checked = s.vehicles.enabled;
@@ -647,6 +670,7 @@ function collectSettings() {
         enabled: $(els.ovEnabled).checked,
         prompts: $(els.ovPrompts).value.split(",").map((s) => s.trim()).filter(Boolean),
       },
+      min_cameras: parseInt($(els.minCams).value, 10),
     },
     attributes: { behavior: $(els.attrBehavior).checked, age: $(els.attrAge).checked },
     vehicles: {
@@ -695,6 +719,7 @@ function wireSettings() {
     $("btn-settings").classList.toggle("active");
   });
   $("btn-cameras").addEventListener("click", toggleCameras);
+  $("btn-audio").addEventListener("click", toggleAudio);
 }
 
 function toggleCameras() {
@@ -705,6 +730,16 @@ function toggleCameras() {
     if (hidden) { img.removeAttribute("src"); }
     else { img.src = `/stream/${img.dataset.cam}`; }
   });
+  setTimeout(resize, 50);
+}
+
+function toggleAudio() {
+  const hidden = document.body.classList.toggle("audio-hidden");
+  $("btn-audio").classList.toggle("active", !hidden);
+  localStorage.setItem("camdetect.audio", hidden ? "0" : "1");
+  // stop/refresh the spectrogram stream to save bandwidth when hidden
+  if (hidden) spectro.removeAttribute("src");
+  else if (selectedAudioCam) spectro.src = `/audio/${selectedAudioCam}/spectrogram`;
   setTimeout(resize, 50);
 }
 
@@ -729,6 +764,10 @@ async function boot() {
   buildAudioTabs(appConfig.cameras);
   buildRecCams();
   document.getElementById("mode").textContent = appConfig.mode + " mode";
+  if (appConfig.build) {
+    document.getElementById("ver").textContent =
+      `v${appConfig.build.version} (${appConfig.build.commit})`;
+  }
 
   // settings: server values, overlaid by any saved local preferences
   settings = await (await fetch("/api/settings")).json();
@@ -744,6 +783,8 @@ async function boot() {
 
   // camera visibility preference (default hidden)
   if (localStorage.getItem("camdetect.cameras") === "1") toggleCameras();
+  // audio panel preference (default shown)
+  if (localStorage.getItem("camdetect.audio") === "0") toggleAudio();
 
   resize();
   connectWs();
