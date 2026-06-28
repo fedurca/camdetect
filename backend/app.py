@@ -16,7 +16,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import logging_setup
@@ -164,6 +164,43 @@ def api_history_stats() -> JSONResponse:
     if pipeline is None or pipeline.db is None:
         return JSONResponse({"objects": 0, "events": 0, "by_class": {}})
     return JSONResponse(pipeline.db.stats())
+
+
+@app.post("/api/record/start")
+async def api_record_start(request: Request) -> JSONResponse:
+    if pipeline is None:
+        return JSONResponse({"error": "pipeline not ready"}, status_code=503)
+    body = await request.json()
+    cam = str(body.get("cam", ""))
+    if cfg.camera(cam) is None:
+        return JSONResponse({"error": f"unknown camera {cam}"}, status_code=404)
+    duration = float(body.get("duration", 15.0))
+    return JSONResponse(pipeline.recorder.start(cam, duration))
+
+
+@app.post("/api/record/stop")
+async def api_record_stop(request: Request) -> JSONResponse:
+    if pipeline is None:
+        return JSONResponse({"error": "pipeline not ready"}, status_code=503)
+    body = await request.json()
+    return JSONResponse(pipeline.recorder.stop(str(body.get("cam", ""))))
+
+
+@app.get("/api/recordings")
+def api_recordings() -> JSONResponse:
+    if pipeline is None:
+        return JSONResponse({"recordings": []})
+    return JSONResponse({"recordings": pipeline.recorder.list_recordings()})
+
+
+@app.get("/recordings/{name}")
+def get_recording(name: str):
+    if pipeline is None or "/" in name or "\\" in name:
+        return JSONResponse({"error": "bad request"}, status_code=400)
+    path = os.path.join(pipeline.recorder.dir, name)
+    if not os.path.exists(path):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return FileResponse(path, media_type="video/x-matroska", filename=name)
 
 
 @app.get("/api/state")

@@ -24,6 +24,7 @@ env/
 data/snapshots/
 data/logs/
 data/audio/
+data/recordings/
 data/startup.json
 *.sqlite
 *.sqlite-journal

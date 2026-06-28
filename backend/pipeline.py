@@ -31,6 +31,7 @@ from .db import Database
 from .detector import (Detection, Detector, OpenVocabDetector, merge_detections,
                        resolve_device)
 from .fusion import Fusion, WorldDetection
+from .recorder import RecordingManager
 from .settings import Settings
 from .transcribe import TranscriptionManager
 from .vehicles import VehicleAnalyzer, VehicleInfo
@@ -114,6 +115,11 @@ class Pipeline:
         # Vehicle analyzer (ANPR + make/model) and recent observations buffer.
         self.vehicle = VehicleAnalyzer(cfg.vehicles.ocr_backend)
         self._vehicle_obs: list[tuple[float, float, VehicleInfo, float]] = []
+
+        # Video sample recorder (MKV + events subtitle track).
+        self.recorder = RecordingManager(
+            cfg, mode, get_jpeg=self.latest_jpeg, get_state=self.get_state,
+            url_for=lambda cid: (self.cfg.camera(cid).url if self.cfg.camera(cid) else None))
 
         if mode == "live":
             self.detectors = self._build_detectors()
@@ -207,6 +213,7 @@ class Pipeline:
 
     def stop(self) -> None:
         self._stop.set()
+        self.recorder.stop_all()
         self.transcription.stop()
         self.audio.stop()
         if self.db is not None:
