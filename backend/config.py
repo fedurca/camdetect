@@ -22,13 +22,38 @@ class ServerConfig:
 
 
 @dataclass
+class OpenVocabConfig:
+    """Open-vocabulary (YOLO-World) detector for classes not in COCO."""
+
+    enabled: bool = False
+    model: str = "models/yolov8s-world.pt"
+    confidence: float = 0.10
+    # Text prompts; mapped to canonical class names in classes.py.
+    prompts: list[str] = field(default_factory=lambda: [
+        "trash bin", "garbage can", "kick scooter", "roller skates",
+        "inline skates", "drone", "quadcopter",
+    ])
+
+
+@dataclass
+class AttributesConfig:
+    """Per-person attribute estimation."""
+
+    behavior: bool = True   # standing/walking/running/loitering (cheap)
+    age: bool = False       # experimental, needs a visible face (off on CPU)
+
+
+@dataclass
 class DetectionConfig:
+    enabled: bool = True
     device: str = "auto"
     model: str = "yolo11n.pt"
     imgsz: int = 960
     confidence: float = 0.35
     fps: float = 3.0
     classes: Optional[list[int]] = None
+    open_vocabulary: OpenVocabConfig = field(default_factory=OpenVocabConfig)
+    attributes: AttributesConfig = field(default_factory=AttributesConfig)
 
 
 @dataclass
@@ -63,6 +88,30 @@ class FusionConfig:
 
 
 @dataclass
+class AudioEventsConfig:
+    """Sound-event classification (heavy model, off by default on CPU)."""
+
+    enabled: bool = False
+    model: str = "panns_cnn14"  # informational; classifier is pluggable
+
+
+@dataclass
+class AudioConfig:
+    enabled: bool = True
+    sample_rate: int = 16000
+    window_s: float = 2.0      # analysis window length
+    hop_s: float = 0.5         # how often we recompute
+    fft_size: int = 1024
+    hop_size: int = 256
+    mel_bands: int = 96
+    fmax: int = 8000
+    spectrogram_width: int = 320
+    spectrogram_height: int = 160
+    engine_2t4t: bool = True   # experimental 2-stroke/4-stroke heuristic
+    events: AudioEventsConfig = field(default_factory=AudioEventsConfig)
+
+
+@dataclass
 class CalibrationConfig:
     dir: str = "data/calibration"
 
@@ -75,6 +124,7 @@ class Config:
     world: WorldConfig = field(default_factory=WorldConfig)
     cameras: list[CameraConfig] = field(default_factory=list)
     fusion: FusionConfig = field(default_factory=FusionConfig)
+    audio: AudioConfig = field(default_factory=AudioConfig)
     calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
     path: str = DEFAULT_CONFIG_PATH
 
@@ -98,10 +148,21 @@ def load_config(path: str = DEFAULT_CONFIG_PATH) -> Config:
         raw = yaml.safe_load(fh) or {}
 
     server = ServerConfig(**(raw.get("server") or {}))
-    detection = DetectionConfig(**(raw.get("detection") or {}))
+
+    det_raw = dict(raw.get("detection") or {})
+    open_vocab = OpenVocabConfig(**(det_raw.pop("open_vocabulary", None) or {}))
+    attributes = AttributesConfig(**(det_raw.pop("attributes", None) or {}))
+    detection = DetectionConfig(open_vocabulary=open_vocab, attributes=attributes,
+                                **det_raw)
+
     intrinsics = IntrinsicsConfig(**(raw.get("intrinsics") or {}))
     world = WorldConfig(**(raw.get("world") or {}))
     fusion = FusionConfig(**(raw.get("fusion") or {}))
+
+    audio_raw = dict(raw.get("audio") or {})
+    audio_events = AudioEventsConfig(**(audio_raw.pop("events", None) or {}))
+    audio = AudioConfig(events=audio_events, **audio_raw)
+
     calibration = CalibrationConfig(**(raw.get("calibration") or {}))
 
     cameras: list[CameraConfig] = []
@@ -123,6 +184,7 @@ def load_config(path: str = DEFAULT_CONFIG_PATH) -> Config:
         world=world,
         cameras=cameras,
         fusion=fusion,
+        audio=audio,
         calibration=calibration,
         path=path,
     )

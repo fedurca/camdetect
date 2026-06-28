@@ -11,6 +11,9 @@ server:
 # Compute / detection
 # ---------------------------------------------------------------------------
 detection:
+  # Master switch for video detection (toggleable at runtime via the UI).
+  enabled: true
+
   # "auto" picks cuda when available, otherwise cpu.
   # For the future multi-GPU box you can override per camera (see cameras[].device).
   device: "auto"
@@ -34,6 +37,27 @@ detection:
   # plus common animals: bird(14), cat(15), dog(16), horse(17), sheep(18),
   # cow(19), elephant(20), bear(21), zebra(22), giraffe(23).
   classes: [0, 1, 2, 3, 5, 7, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+
+  # Open-vocabulary detector (YOLO-World) for classes not in COCO:
+  # popelnice/trash bin, koloberka/scooter, brusle/skates, dron/drone.
+  # Heavy on CPU -> default OFF; recommended for the GPU rig.
+  open_vocabulary:
+    enabled: false
+    model: "models/yolov8s-world.pt"
+    confidence: 0.10
+    prompts:
+      - "trash bin"
+      - "garbage can"
+      - "kick scooter"
+      - "roller skates"
+      - "inline skates"
+      - "drone"
+      - "quadcopter"
+
+  # Per-person attribute estimation.
+  attributes:
+    behavior: true   # standing/walking/running/loitering from motion (cheap)
+    age: false       # experimental, needs a visible face (off on CPU)
 
 # ---------------------------------------------------------------------------
 # Camera intrinsics (shared - all 3 are identical UniFi G5 Bullet 2K)
@@ -89,6 +113,25 @@ fusion:
   smoothing: 0.5
   # Default assumed object height (m) for 3D boxes when class height unknown.
   default_height_m: 1.7
+
+# ---------------------------------------------------------------------------
+# Audio detection (audio is part of each camera's RTSP stream)
+# ---------------------------------------------------------------------------
+audio:
+  enabled: true
+  sample_rate: 16000
+  window_s: 2.0        # analysis window length (seconds)
+  hop_s: 0.5           # recompute interval (seconds)
+  fft_size: 1024
+  hop_size: 256
+  mel_bands: 96
+  fmax: 8000
+  spectrogram_width: 320
+  spectrogram_height: 160
+  engine_2t4t: true    # experimental 2-stroke vs 4-stroke heuristic
+  events:
+    enabled: false     # sound-event classifier (heavy) -> default OFF on CPU
+    model: "panns_cnn14"
 
 calibration:
   dir: "data/calibration"
