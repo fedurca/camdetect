@@ -6,25 +6,50 @@ import { colorFor, cssColor, hexColor, CLASS_COLORS } from "/colors.js";
 // State
 // ---------------------------------------------------------------------------
 let appConfig = null;
-let center = { x: 0, y: 0 };          // world-frame center used to center the scene
-const objectMeshes = new Map();        // id -> { group, mesh, label, class }
+let labels = {};                       // class -> Czech label
+let center = { x: 0, y: 0 };
+const objectMeshes = new Map();        // id -> { group, box, label, class }
 let latestObjects = [];
+let latestAudio = {};                  // cam -> audio result
+let selectedAudioCam = null;
+const prevPos = new Map();             // id -> {x,y} for heading arrows
 
-// Footprint (meters) per class for the 3D boxes.
+const BEHAVIOR_CS = {
+  standing: "stoji", walking: "jde", running: "bezi", loitering: "postava",
+  moving: "jede", stopped: "stoji",
+};
+const EVENT_CS = {
+  engine: "motor", drone: "dron", bark: "stekot", speech: "rec", loud: "hluk",
+};
+const EVENT_COLORS = {
+  engine: "#38bdf8", drone: "#fafafa", bark: "#fb923c", speech: "#a78bfa",
+  loud: "#facc15",
+};
+
+function labelFor(cls) { return labels[cls] || cls; }
+
+function objectLabel(o) {
+  let s = `${labelFor(o.class)} #${o.id} ${(o.prob ?? 0).toFixed(2)}`;
+  if (o.behavior) s += ` · ${BEHAVIOR_CS[o.behavior] || o.behavior}`;
+  if (o.age) s += ` · ${o.age}`;
+  if (o.engine_type) s += ` · ${o.engine_type}`;
+  return s;
+}
+
+// Footprint (meters) per class for 3D boxes.
 const FOOTPRINT = {
-  person: [0.6, 0.6], bicycle: [1.6, 0.6], car: [4.4, 1.9],
-  motorcycle: [2.0, 0.8], bus: [10, 2.5], truck: [7, 2.5],
+  person: [0.6, 0.6], bicycle: [1.6, 0.6], car: [4.4, 1.9], motorcycle: [2.0, 0.8],
+  bus: [10, 2.5], truck: [7, 2.5], "trash bin": [0.6, 0.6], scooter: [1.2, 0.5],
+  skates: [0.6, 0.4], drone: [0.5, 0.5], dog: [0.8, 0.4],
 };
 function footprint(name) { return FOOTPRINT[name] || [0.7, 0.7]; }
 
-// World (X,Y[,up]) -> scene coords. X east, Y north, Z up in world; in three.js
-// we use X right, Y up, Z toward viewer, so north maps to -Z.
 function worldToScene(X, Y, up = 0) {
   return new THREE.Vector3(X - center.x, up, -(Y - center.y));
 }
 
 // ---------------------------------------------------------------------------
-// Three.js setup
+// Three.js 3D scene
 // ---------------------------------------------------------------------------
 const sceneEl = document.getElementById("scene");
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -36,10 +61,8 @@ scene.background = new THREE.Color(0x0b0f17);
 
 const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 1000);
 camera.position.set(0, 18, 22);
-
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-controls.target.set(0, 0, 0);
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.75));
 const dir = new THREE.DirectionalLight(0xffffff, 0.8);
@@ -52,57 +75,39 @@ function resize() {
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  resizeTopdown();
 }
 window.addEventListener("resize", resize);
 
-// ---------------------------------------------------------------------------
-// Ground + cameras
-// ---------------------------------------------------------------------------
 function buildGround(sizeMeters) {
-  const grid = new THREE.GridHelper(sizeMeters, Math.max(4, Math.round(sizeMeters)),
-    0x334155, 0x1e293b);
-  scene.add(grid);
-
+  scene.add(new THREE.GridHelper(sizeMeters, Math.max(4, Math.round(sizeMeters)),
+    0x334155, 0x1e293b));
   const geo = new THREE.PlaneGeometry(sizeMeters, sizeMeters);
   geo.rotateX(-Math.PI / 2);
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0x0f172a, transparent: true, opacity: 0.6,
-  });
+  const mat = new THREE.MeshStandardMaterial({ color: 0x0f172a, transparent: true, opacity: 0.6 });
   const plane = new THREE.Mesh(geo, mat);
   plane.position.y = -0.01;
   scene.add(plane);
-
-  // Try to drape a satellite image; ignore if it isn't present.
-  new THREE.TextureLoader().load(
-    "/assets/satellite.png",
-    (tex) => {
-      tex.colorSpace = THREE.SRGBColorSpace;
-      mat.map = tex;
-      mat.color.set(0xffffff);
-      mat.opacity = 1;
-      mat.needsUpdate = true;
-    },
-    undefined,
-    () => {/* no satellite image - keep grid */}
-  );
+  new THREE.TextureLoader().load("/assets/satellite.png", (tex) => {
+    tex.colorSpace = THREE.SRGBColorSpace;
+    mat.map = tex; mat.color.set(0xffffff); mat.opacity = 1; mat.needsUpdate = true;
+  }, undefined, () => {});
 }
 
 function labelSprite(text, rgb) {
   const canvas = document.createElement("canvas");
-  canvas.width = 256; canvas.height = 64;
+  canvas.width = 320; canvas.height = 64;
   const ctx = canvas.getContext("2d");
-  ctx.fillStyle = `rgba(10,14,22,0.85)`;
-  ctx.fillRect(0, 0, 256, 64);
+  ctx.fillStyle = "rgba(10,14,22,0.85)"; ctx.fillRect(0, 0, 320, 64);
   ctx.strokeStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
-  ctx.lineWidth = 4; ctx.strokeRect(2, 2, 252, 60);
-  ctx.fillStyle = "#fff";
-  ctx.font = "bold 28px sans-serif";
+  ctx.lineWidth = 4; ctx.strokeRect(2, 2, 316, 60);
+  ctx.fillStyle = "#fff"; ctx.font = "bold 24px sans-serif";
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText(text, 128, 34);
+  ctx.fillText(text, 160, 34);
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
-  spr.scale.set(2.4, 0.6, 1);
+  spr.scale.set(3.0, 0.6, 1);
   return spr;
 }
 
@@ -110,100 +115,75 @@ function buildCameras(cameras) {
   for (const cam of cameras) {
     const [X, Y] = cam.world_xy;
     const pos = worldToScene(X, Y, cam.height_m);
-    const geo = new THREE.ConeGeometry(0.4, 0.9, 4);
-    const mat = new THREE.MeshStandardMaterial({ color: 0x38bdf8 });
-    const cone = new THREE.Mesh(geo, mat);
-    cone.position.copy(pos);
-    cone.rotation.x = Math.PI; // point down
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.4, 0.9, 4),
+      new THREE.MeshStandardMaterial({ color: 0x38bdf8 }));
+    cone.position.copy(pos); cone.rotation.x = Math.PI;
     scene.add(cone);
-
-    // pole to the ground
-    const pole = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints([pos, worldToScene(X, Y, 0)]),
-      new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.5 })
-    );
-    scene.add(pole);
-
-    // sight line toward courtyard center
-    const sight = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints([pos, worldToScene(center.x, center.y, 0.2)]),
-      new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.25 })
-    );
-    scene.add(sight);
-
+    scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(
+      [pos, worldToScene(X, Y, 0)]),
+      new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.5 })));
+    scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(
+      [pos, worldToScene(center.x, center.y, 0.2)]),
+      new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.25 })));
     const tag = labelSprite(cam.id, [56, 189, 248]);
     tag.position.copy(pos.clone().add(new THREE.Vector3(0, 0.9, 0)));
-    tag.scale.set(1.6, 0.4, 1);
+    tag.scale.set(1.6, 0.35, 1);
     scene.add(tag);
   }
 }
 
-// ---------------------------------------------------------------------------
-// Object boxes
-// ---------------------------------------------------------------------------
 function makeObject(o) {
   const [fw, fd] = footprint(o.class);
   const h = o.height || 1.7;
-  const rgb = colorFor(o.class);
   const group = new THREE.Group();
-
-  const box = new THREE.Mesh(
-    new THREE.BoxGeometry(fw, h, fd),
-    new THREE.MeshStandardMaterial({
-      color: hexColor(o.class), transparent: true, opacity: 0.55,
-    })
-  );
-  box.position.y = h / 2;
-  group.add(box);
-
-  const edges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(box.geometry),
-    new THREE.LineBasicMaterial({ color: hexColor(o.class) })
-  );
-  edges.position.y = h / 2;
-  group.add(edges);
-
-  const label = labelSprite(`${o.class} #${o.id} ${o.prob.toFixed(2)}`, rgb);
-  label.position.y = h + 0.6;
-  group.add(label);
-
+  const box = new THREE.Mesh(new THREE.BoxGeometry(fw, h, fd),
+    new THREE.MeshStandardMaterial({ color: hexColor(o.class), transparent: true, opacity: 0.55 }));
+  box.position.y = h / 2; group.add(box);
+  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(box.geometry),
+    new THREE.LineBasicMaterial({ color: hexColor(o.class) }));
+  edges.position.y = h / 2; group.add(edges);
+  const label = labelSprite(objectLabel(o), colorFor(o.class));
+  label.position.y = h + 0.6; group.add(label);
   scene.add(group);
-  return { group, box, label, class: o.class };
+  return { group, box, label, class: o.class, text: objectLabel(o) };
 }
 
 function updateObjects(objects) {
   const seen = new Set();
   for (const o of objects) {
     seen.add(o.id);
-    let entry = objectMeshes.get(o.id);
-    if (!entry || entry.class !== o.class) {
-      if (entry) scene.remove(entry.group);
-      entry = makeObject(o);
-      objectMeshes.set(o.id, entry);
-    } else {
-      // refresh label (probability changes)
-      entry.group.remove(entry.label);
-      entry.label = labelSprite(`${o.class} #${o.id} ${o.prob.toFixed(2)}`, colorFor(o.class));
-      entry.label.position.y = (o.height || 1.7) + 0.6;
-      entry.group.add(entry.label);
+    let e = objectMeshes.get(o.id);
+    const text = objectLabel(o);
+    if (!e || e.class !== o.class) {
+      if (e) scene.remove(e.group);
+      e = makeObject(o);
+      objectMeshes.set(o.id, e);
+    } else if (e.text !== text) {
+      e.group.remove(e.label);
+      e.label = labelSprite(text, colorFor(o.class));
+      e.label.position.y = (o.height || 1.7) + 0.6;
+      e.group.add(e.label);
+      e.text = text;
     }
     const p = worldToScene(o.x, o.y, 0);
-    entry.group.position.set(p.x, 0, p.z);
+    e.group.position.set(p.x, 0, p.z);
   }
-  for (const [id, entry] of objectMeshes) {
-    if (!seen.has(id)) {
-      scene.remove(entry.group);
-      objectMeshes.delete(id);
-    }
+  for (const [id, e] of objectMeshes) {
+    if (!seen.has(id)) { scene.remove(e.group); objectMeshes.delete(id); }
   }
 }
 
 // ---------------------------------------------------------------------------
-// Minimap (top-down)
+// Top-down 2D view
 // ---------------------------------------------------------------------------
-const mini = document.getElementById("minimap");
-const mctx = mini.getContext("2d");
-let miniBounds = { minX: -10, maxX: 10, minY: -10, maxY: 10 };
+const td = document.getElementById("topdown");
+const tdx = td.getContext("2d");
+let bounds = { minX: -10, maxX: 10, minY: -10, maxY: 10 };
+
+function resizeTopdown() {
+  td.width = td.clientWidth || 300;
+  td.height = td.clientHeight || 200;
+}
 
 function computeBounds(cameras) {
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -211,42 +191,129 @@ function computeBounds(cameras) {
     minX = Math.min(minX, c.world_xy[0]); maxX = Math.max(maxX, c.world_xy[0]);
     minY = Math.min(minY, c.world_xy[1]); maxY = Math.max(maxY, c.world_xy[1]);
   }
-  const padX = (maxX - minX) * 0.3 + 3;
-  const padY = (maxY - minY) * 0.3 + 3;
-  miniBounds = { minX: minX - padX, maxX: maxX + padX, minY: minY - padY, maxY: maxY + padY };
+  const px = (maxX - minX) * 0.35 + 3, py = (maxY - minY) * 0.35 + 3;
+  bounds = { minX: minX - px, maxX: maxX + px, minY: minY - py, maxY: maxY + py };
 }
 
-function miniPt(X, Y) {
-  const { minX, maxX, minY, maxY } = miniBounds;
-  const px = ((X - minX) / (maxX - minX)) * mini.width;
-  // invert Y so north is up
-  const py = mini.height - ((Y - minY) / (maxY - minY)) * mini.height;
-  return [px, py];
+function tdPt(X, Y) {
+  const { minX, maxX, minY, maxY } = bounds;
+  const sx = td.width / (maxX - minX), sy = td.height / (maxY - minY);
+  const s = Math.min(sx, sy);
+  const ox = (td.width - (maxX - minX) * s) / 2;
+  const oy = (td.height - (maxY - minY) * s) / 2;
+  return [ox + (X - minX) * s, td.height - oy - (Y - minY) * s];
 }
 
-function drawMinimap() {
-  mctx.clearRect(0, 0, mini.width, mini.height);
-  mctx.fillStyle = "rgba(5,8,14,0.6)";
-  mctx.fillRect(0, 0, mini.width, mini.height);
-
-  if (appConfig) {
-    mctx.fillStyle = "#38bdf8";
-    for (const c of appConfig.cameras) {
-      const [px, py] = miniPt(c.world_xy[0], c.world_xy[1]);
-      mctx.beginPath();
-      mctx.moveTo(px, py - 5); mctx.lineTo(px - 4, py + 4); mctx.lineTo(px + 4, py + 4);
-      mctx.closePath(); mctx.fill();
-    }
+function drawTopdown() {
+  if (!appConfig) return;
+  tdx.clearRect(0, 0, td.width, td.height);
+  tdx.fillStyle = "#0a0e16"; tdx.fillRect(0, 0, td.width, td.height);
+  // grid lines every 2 m
+  tdx.strokeStyle = "#1e293b"; tdx.lineWidth = 1;
+  for (let g = Math.ceil(bounds.minX); g <= bounds.maxX; g += 2) {
+    const [x] = tdPt(g, 0); tdx.beginPath(); tdx.moveTo(x, 0); tdx.lineTo(x, td.height); tdx.stroke();
   }
+  for (let g = Math.ceil(bounds.minY); g <= bounds.maxY; g += 2) {
+    const [, y] = tdPt(0, g); tdx.beginPath(); tdx.moveTo(0, y); tdx.lineTo(td.width, y); tdx.stroke();
+  }
+  // cameras
+  const [ccx, ccy] = tdPt(center.x, center.y);
+  for (const c of appConfig.cameras) {
+    const [px, py] = tdPt(c.world_xy[0], c.world_xy[1]);
+    tdx.strokeStyle = "rgba(56,189,248,0.35)"; tdx.beginPath();
+    tdx.moveTo(px, py); tdx.lineTo(ccx, ccy); tdx.stroke();
+    tdx.fillStyle = "#38bdf8"; tdx.beginPath();
+    tdx.moveTo(px, py - 6); tdx.lineTo(px - 5, py + 5); tdx.lineTo(px + 5, py + 5);
+    tdx.closePath(); tdx.fill();
+    tdx.fillStyle = "#94a3b8"; tdx.font = "10px sans-serif"; tdx.fillText(c.id, px + 7, py + 4);
+  }
+  // objects
   for (const o of latestObjects) {
-    const [px, py] = miniPt(o.x, o.y);
-    mctx.fillStyle = cssColor(o.class);
-    mctx.beginPath();
-    mctx.arc(px, py, 4, 0, Math.PI * 2);
-    mctx.fill();
-    mctx.fillStyle = "#e2e8f0";
-    mctx.font = "9px sans-serif";
-    mctx.fillText(`${o.class[0]}${o.id}`, px + 5, py + 3);
+    const [px, py] = tdPt(o.x, o.y);
+    // heading arrow from previous position
+    const prev = prevPos.get(o.id);
+    if (prev) {
+      const [ppx, ppy] = tdPt(prev.x, prev.y);
+      const dx = px - ppx, dy = py - ppy, len = Math.hypot(dx, dy);
+      if (len > 1.5) {
+        tdx.strokeStyle = cssColor(o.class); tdx.lineWidth = 2;
+        tdx.beginPath(); tdx.moveTo(px, py);
+        tdx.lineTo(px + dx / len * 12, py + dy / len * 12); tdx.stroke();
+      }
+    }
+    tdx.fillStyle = cssColor(o.class);
+    tdx.beginPath(); tdx.arc(px, py, 5, 0, Math.PI * 2); tdx.fill();
+    tdx.fillStyle = "#e2e8f0"; tdx.font = "10px sans-serif";
+    tdx.fillText(`${labelFor(o.class)} #${o.id}`, px + 7, py + 3);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Audio panel
+// ---------------------------------------------------------------------------
+const spectro = document.getElementById("spectrogram");
+const freqC = document.getElementById("freq");
+const freqX = freqC.getContext("2d");
+const eventsEl = document.getElementById("audio-events");
+
+function buildAudioTabs(cameras) {
+  const el = document.getElementById("audio-cams");
+  el.innerHTML = "";
+  cameras.forEach((c, i) => {
+    const b = document.createElement("span");
+    b.className = "tab" + (i === 0 ? " active" : "");
+    b.textContent = c.id;
+    b.onclick = () => selectAudioCam(c.id);
+    el.appendChild(b);
+  });
+  if (cameras.length) selectAudioCam(cameras[0].id);
+}
+
+function selectAudioCam(cam) {
+  selectedAudioCam = cam;
+  spectro.src = `/audio/${cam}/spectrogram`;
+  document.querySelectorAll("#audio-cams .tab").forEach((t) =>
+    t.classList.toggle("active", t.textContent === cam));
+}
+
+function drawFreq() {
+  freqX.clearRect(0, 0, freqC.width, freqC.height);
+  const a = latestAudio[selectedAudioCam];
+  if (!a) return;
+  const bands = [["low", a.bands.low], ["mid", a.bands.mid], ["high", a.bands.high]];
+  const bw = freqC.width / 3;
+  bands.forEach(([name, v], i) => {
+    const h = Math.min(1, v) * (freqC.height - 24);
+    freqX.fillStyle = ["#3b82f6", "#22c55e", "#f59e0b"][i];
+    freqX.fillRect(i * bw + 10, freqC.height - 18 - h, bw - 20, h);
+    freqX.fillStyle = "#94a3b8"; freqX.font = "10px sans-serif";
+    freqX.fillText(name, i * bw + bw / 2 - 8, freqC.height - 4);
+  });
+  freqX.fillStyle = "#e2e8f0"; freqX.font = "11px sans-serif";
+  freqX.fillText(`dom ${a.dominant_freq.toFixed(0)} Hz`, 8, 14);
+  freqX.fillText(`level ${(a.level * 100).toFixed(0)}%`, freqC.width - 80, 14);
+  if (a.engine_type) {
+    freqX.fillStyle = "#38bdf8";
+    freqX.fillText(`motor ${a.engine_type}`, freqC.width - 80, 28);
+  }
+}
+
+function drawAudioEvents() {
+  const a = latestAudio[selectedAudioCam];
+  eventsEl.innerHTML = "";
+  if (!a || !a.events || !a.events.length) {
+    const li = document.createElement("li");
+    li.style.color = "#64748b"; li.textContent = "(zadne udalosti)";
+    eventsEl.appendChild(li); return;
+  }
+  for (const ev of a.events) {
+    const li = document.createElement("li");
+    const sw = document.createElement("span");
+    sw.className = "swatch"; sw.style.background = EVENT_COLORS[ev.type] || "#94a3b8";
+    li.appendChild(sw);
+    li.appendChild(document.createTextNode(
+      `${EVENT_CS[ev.type] || ev.type} ${(ev.conf * 100).toFixed(0)}%`));
+    eventsEl.appendChild(li);
   }
 }
 
@@ -260,8 +327,7 @@ function buildLegend(colors) {
   for (const [name, rgb] of Object.entries(map)) {
     const item = document.createElement("span");
     item.className = "item";
-    item.innerHTML =
-      `<span class="swatch" style="background: rgb(${rgb[0]},${rgb[1]},${rgb[2]})"></span>${name}`;
+    item.innerHTML = `<span class="swatch" style="background: rgb(${rgb[0]},${rgb[1]},${rgb[2]})"></span>${labelFor(name)}`;
     el.appendChild(item);
   }
 }
@@ -274,59 +340,175 @@ function setCameraStatus(status) {
 }
 
 // ---------------------------------------------------------------------------
+// Settings panel
+// ---------------------------------------------------------------------------
+const SETTINGS_KEY = "camdetect.settings";
+let settings = null;
+
+const els = {
+  videoEnabled: "set-video-enabled", videoFps: "set-video-fps", videoImgsz: "set-video-imgsz",
+  videoConf: "set-video-conf", ovEnabled: "set-ov-enabled", ovPrompts: "set-ov-prompts",
+  attrBehavior: "set-attr-behavior", attrAge: "set-attr-age",
+  audioEnabled: "set-audio-enabled", audioEvents: "set-audio-events",
+  audioEngine: "set-audio-engine", audioWindow: "set-audio-window", audioHop: "set-audio-hop",
+};
+const $ = (id) => document.getElementById(id);
+
+function applySettingsToControls(s) {
+  $(els.videoEnabled).checked = s.video.enabled;
+  $(els.videoFps).value = s.video.fps; $("val-video-fps").textContent = s.video.fps;
+  $(els.videoImgsz).value = String(s.video.imgsz);
+  $(els.videoConf).value = s.video.confidence; $("val-video-conf").textContent = s.video.confidence;
+  $(els.ovEnabled).checked = s.video.open_vocabulary.enabled;
+  $(els.ovPrompts).value = (s.video.open_vocabulary.prompts || []).join(", ");
+  $(els.attrBehavior).checked = s.attributes.behavior;
+  $(els.attrAge).checked = s.attributes.age;
+  $(els.audioEnabled).checked = s.audio.enabled;
+  $(els.audioEvents).checked = s.audio.events;
+  $(els.audioEngine).checked = s.audio.engine_2t4t;
+  $(els.audioWindow).value = s.audio.window_s; $("val-audio-window").textContent = s.audio.window_s;
+  $(els.audioHop).value = s.audio.hop_s; $("val-audio-hop").textContent = s.audio.hop_s;
+}
+
+function collectSettings() {
+  return {
+    video: {
+      enabled: $(els.videoEnabled).checked,
+      fps: parseFloat($(els.videoFps).value),
+      imgsz: parseInt($(els.videoImgsz).value, 10),
+      confidence: parseFloat($(els.videoConf).value),
+      open_vocabulary: {
+        enabled: $(els.ovEnabled).checked,
+        prompts: $(els.ovPrompts).value.split(",").map((s) => s.trim()).filter(Boolean),
+      },
+    },
+    attributes: { behavior: $(els.attrBehavior).checked, age: $(els.attrAge).checked },
+    audio: {
+      enabled: $(els.audioEnabled).checked,
+      events: $(els.audioEvents).checked,
+      engine_2t4t: $(els.audioEngine).checked,
+      window_s: parseFloat($(els.audioWindow).value),
+      hop_s: parseFloat($(els.audioHop).value),
+    },
+  };
+}
+
+async function pushSettings() {
+  const patch = collectSettings();
+  $("val-video-fps").textContent = patch.video.fps;
+  $("val-video-conf").textContent = patch.video.confidence;
+  $("val-audio-window").textContent = patch.audio.window_s;
+  $("val-audio-hop").textContent = patch.audio.hop_s;
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(patch));
+  try {
+    await fetch("/api/settings", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+  } catch (e) { /* ignore */ }
+}
+
+function wireSettings() {
+  for (const id of Object.values(els)) {
+    const el = $(id);
+    el.addEventListener("change", pushSettings);
+    if (el.type === "range") el.addEventListener("input", pushSettings);
+  }
+  $("btn-settings").addEventListener("click", () => {
+    $("drawer").classList.toggle("hidden");
+    $("btn-settings").classList.toggle("active");
+  });
+  $("btn-cameras").addEventListener("click", toggleCameras);
+}
+
+function toggleCameras() {
+  const hidden = document.body.classList.toggle("cameras-hidden");
+  $("btn-cameras").classList.toggle("active", !hidden);
+  localStorage.setItem("camdetect.cameras", hidden ? "0" : "1");
+  document.querySelectorAll("img.stream").forEach((img) => {
+    if (hidden) { img.removeAttribute("src"); }
+    else { img.src = `/stream/${img.dataset.cam}`; }
+  });
+  setTimeout(resize, 50);
+}
+
+// ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
 async function boot() {
-  const res = await fetch("/api/config");
-  appConfig = await res.json();
+  appConfig = await (await fetch("/api/config")).json();
+  labels = appConfig.labels || {};
 
   const cs = appConfig.cameras.map((c) => c.world_xy);
   center.x = cs.reduce((s, p) => s + p[0], 0) / cs.length;
   center.y = cs.reduce((s, p) => s + p[1], 0) / cs.length;
-
   let span = 8;
-  for (const c of appConfig.cameras) {
+  for (const c of appConfig.cameras)
     span = Math.max(span, Math.abs(c.world_xy[0] - center.x), Math.abs(c.world_xy[1] - center.y));
-  }
+
   buildGround(Math.ceil(span * 2 + 8));
   buildCameras(appConfig.cameras);
   computeBounds(appConfig.cameras);
   buildLegend(appConfig.colors);
-
+  buildAudioTabs(appConfig.cameras);
   document.getElementById("mode").textContent = appConfig.mode + " mode";
 
-  // Point each stream <img> at its MJPEG endpoint.
-  document.querySelectorAll("img.stream").forEach((img) => {
-    img.src = `/stream/${img.dataset.cam}`;
-  });
+  // settings: server values, overlaid by any saved local preferences
+  settings = await (await fetch("/api/settings")).json();
+  const saved = localStorage.getItem(SETTINGS_KEY);
+  if (saved) {
+    try { settings = deepMerge(settings, JSON.parse(saved)); } catch (e) {}
+  }
+  applySettingsToControls(settings);
+  wireSettings();
+  await pushSettings();
+
+  // camera visibility preference (default hidden)
+  if (localStorage.getItem("camdetect.cameras") === "1") toggleCameras();
 
   resize();
   connectWs();
   animate();
 }
 
+function deepMerge(base, patch) {
+  const out = Array.isArray(base) ? base.slice() : { ...base };
+  for (const k in patch) {
+    if (patch[k] && typeof patch[k] === "object" && !Array.isArray(patch[k]) &&
+        base[k] && typeof base[k] === "object")
+      out[k] = deepMerge(base[k], patch[k]);
+    else out[k] = patch[k];
+  }
+  return out;
+}
+
 function connectWs() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
   const conn = document.getElementById("conn");
-  ws.onopen = () => { conn.textContent = "live"; conn.className = "badge badge-on"; };
+  ws.onopen = () => { conn.textContent = "zive"; conn.className = "badge badge-on"; };
   ws.onclose = () => {
-    conn.textContent = "disconnected"; conn.className = "badge badge-off";
+    conn.textContent = "odpojeno"; conn.className = "badge badge-off";
     setTimeout(connectWs, 1500);
   };
   ws.onmessage = (ev) => {
     const state = JSON.parse(ev.data);
+    // remember previous positions for heading arrows
+    for (const o of latestObjects) prevPos.set(o.id, { x: o.x, y: o.y });
     latestObjects = state.objects || [];
+    latestAudio = state.audio || {};
     updateObjects(latestObjects);
     setCameraStatus(state.cameras);
-    document.getElementById("objcount").textContent = `${latestObjects.length} objects`;
+    document.getElementById("objcount").textContent = `${latestObjects.length} objektu`;
   };
 }
 
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
-  drawMinimap();
+  drawTopdown();
+  drawFreq();
+  drawAudioEvents();
   renderer.render(scene, camera);
 }
 

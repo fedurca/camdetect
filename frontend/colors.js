@@ -18,6 +18,10 @@ export const CLASS_COLORS = {
   bear: [120, 53, 15],
   zebra: [226, 232, 240],
   giraffe: [202, 138, 4],
+  "trash bin": [74, 222, 128],
+  scooter: [34, 211, 238],
+  skates: [232, 121, 249],
+  drone: [250, 250, 250],
 };
 
 export const DEFAULT_COLOR = [148, 163, 184];
