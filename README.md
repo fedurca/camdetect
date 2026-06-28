@@ -156,6 +156,46 @@ Set `azimuth_deg`/`range_m` per camera from the UniFi coverage map for the most
 accurate wedges (cam2 faces the garage gate, cam3 is to its left, cam4 to its
 right).
 
+## Fewer false positives (multi-camera confirmation)
+
+To suppress spurious detections when "nothing is happening", an object is only
+shown/logged once it is **confirmed by at least `fusion.min_cameras` cameras**
+(default 2; set to 3 to require all three) within `fusion.confirm_window_s` and
+seen for `fusion.min_hits` updates, and the detection `confidence` floor was
+raised. `min_cameras` is also adjustable live in the settings drawer.
+
+## Running on the GPUs
+
+When CUDA is available the detectors are spread across **all GPUs round-robin**
+(camera -> `cuda:0`, `cuda:1`, ...) automatically when `detection.device: auto`;
+pin explicitly per camera with `device: "cuda:N"`. The Czech transcription model
+also runs on GPU. Verify in the Benchmark tab and `nvidia-smi`.
+
+## Version
+
+The running build's version and git commit are shown in the top bar and in
+`GET /api/config` (`build`). Override the commit in containers with
+`CAMDETECT_COMMIT`.
+
+## Daily report
+
+The **Report** tab shows a daily summary of what happened on the cameras: a
+text overview (object counts by class, event totals, busiest hour, vehicles with
+plates, recent transcripts) plus a set of snapshot images. Snapshots are saved
+periodically to `data/report/<date>/` (`report.*` config); query via
+`GET /api/report?date=YYYY-MM-DD`.
+
+## Run as a service (systemd, autostart + auto-recovery)
+
+```bash
+sudo ./deploy/install-service.sh live 8000
+```
+
+Installs `camdetect.service` (enabled on boot, `Restart=always` for crash
+recovery). Manage with `systemctl status|restart camdetect` and
+`journalctl -u camdetect -f`. Uninstall:
+`sudo systemctl disable --now camdetect && sudo rm /etc/systemd/system/camdetect.service`.
+
 ## Duplicate-detection handling
 
 The same physical object seen from several cameras (often with a flipped label,
@@ -201,7 +241,8 @@ at startup via `CAMDETECT_LOG_LEVEL`, and changed live from the tab
 
 - The audio panel shows a **single combined frequency plot** with all three
   cameras' band energies overlaid (grouped bars, one color per camera); the
-  spectrogram tabs still pick a single camera.
+  spectrogram tabs still pick a single camera. The whole audio panel is
+  **hideable** ("Zvuk" button), as are the camera previews.
 - The layout is **mobile friendly**: on narrow screens the panels stack
   vertically, the tab bar scrolls, and the audio sub-panels reflow to one column.
 
