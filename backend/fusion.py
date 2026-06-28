@@ -129,6 +129,9 @@ class Track:
             v = getattr(self, k)
             if v:
                 d[k] = v
+        # drones carry a trajectory trail (recent ground positions)
+        if self.class_name == "drone" and len(self.history) > 1:
+            d["trail"] = [[round(x, 2), round(y, 2)] for (_t, x, y) in self.history]
         return d
 
 
@@ -143,7 +146,8 @@ CLASS_GROUPS = {
     "car": "vehicle", "truck": "vehicle", "bus": "vehicle",
 }
 # Per-group merge radius multiplier (applied to the base merge distance).
-GROUP_RADIUS_MULT = {"vehicle": 3.0, "person": 1.6}
+# Drones use a small radius so two drones close together stay separate.
+GROUP_RADIUS_MULT = {"vehicle": 3.0, "person": 1.6, "drone": 0.6}
 
 
 def group_of(class_name: str) -> str:
@@ -173,6 +177,8 @@ class Fusion:
         self.min_cameras = min_cameras
         self.min_hits = min_hits
         self.confirm_window_s = confirm_window_s
+        # per-group override of min_cameras (e.g. drones confirm with 1 camera)
+        self.min_cameras_by_group: dict[str, int] = {}
         self.tracks: dict[int, Track] = {}
         self._ids = count(1)
 
@@ -282,10 +288,14 @@ class Fusion:
 
         # -- step 4: only return CONFIRMED tracks -------------------------
         # Unconfirmed tracks stay internally so they can be confirmed later,
-        # but are not shown/logged - this suppresses false positives.
-        return [t for t in self.tracks.values()
-                if t.confirmed(now, self.min_cameras, self.min_hits,
-                               self.confirm_window_s)]
+        # but are not shown/logged - this suppresses false positives. The
+        # required camera count can be overridden per group (drones: 1).
+        out = []
+        for t in self.tracks.values():
+            mc = self.min_cameras_by_group.get(group_of(t.class_name), self.min_cameras)
+            if t.confirmed(now, mc, self.min_hits, self.confirm_window_s):
+                out.append(t)
+        return out
 
     def _dedupe_tracks(self) -> None:
         """Collapse pre-existing tracks of the same group that drifted within

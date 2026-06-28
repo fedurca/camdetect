@@ -164,6 +164,23 @@ audio:
     model: "panns_cnn14"
 
 # ---------------------------------------------------------------------------
+# Drone-focused detection: visual tracking + audio + fusion.
+# One switch (enabled) turns it on; the rest is deeper tuning. Higher
+# sensitivity lowers thresholds so small/distant drones are caught.
+# ---------------------------------------------------------------------------
+drone:
+  enabled: false
+  visual: true          # open-vocabulary drone detection
+  audio: true           # acoustic buzz detection
+  fuse: true            # combine visual + audio evidence
+  sensitivity: 0.6      # 0..1
+  min_cameras: 1        # drones often appear in a single sky-facing camera
+  separation_m: 1.5     # min distance to treat as two distinct drones
+  trajectory_s: 20.0    # trajectory trail length (seconds)
+  min_track_len: 3
+  prompts: ["drone", "quadcopter", "uav", "rc aircraft"]
+
+# ---------------------------------------------------------------------------
 # Local object/event database (SQLite)
 # ---------------------------------------------------------------------------
 database:

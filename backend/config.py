@@ -126,6 +126,31 @@ class AudioConfig:
 
 
 @dataclass
+class DroneConfig:
+    """Drone-focused detection: visual tracking + audio + fusion.
+
+    A single ``enabled`` flag turns the whole drone pipeline on; the rest is
+    deeper tuning. ``sensitivity`` (0..1) lowers the visual/audio thresholds so
+    small/distant drones are caught.
+    """
+
+    enabled: bool = False
+    visual: bool = True          # open-vocabulary drone detection
+    audio: bool = True           # acoustic (high-frequency buzz) detection
+    fuse: bool = True            # combine visual + audio evidence
+    sensitivity: float = 0.6
+    # drones are often visible to a single (sky-facing) camera, so require
+    # fewer confirming cameras than ground objects
+    min_cameras: int = 1
+    separation_m: float = 1.5    # min distance to treat as two distinct drones
+    trajectory_s: float = 20.0   # how long a trajectory trail to keep/draw
+    min_track_len: int = 3       # points before drawing a trajectory
+    prompts: list[str] = field(default_factory=lambda: [
+        "drone", "quadcopter", "uav", "rc aircraft",
+    ])
+
+
+@dataclass
 class DatabaseConfig:
     enabled: bool = True
     path: str = "data/camdetect.sqlite"
@@ -188,6 +213,7 @@ class Config:
     cameras: list[CameraConfig] = field(default_factory=list)
     fusion: FusionConfig = field(default_factory=FusionConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
+    drone: DroneConfig = field(default_factory=DroneConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     vehicles: VehiclesConfig = field(default_factory=VehiclesConfig)
     transcription: TranscriptionConfig = field(default_factory=TranscriptionConfig)
@@ -234,6 +260,7 @@ def load_config(path: str = DEFAULT_CONFIG_PATH) -> Config:
     audio_events = AudioEventsConfig(**(audio_raw.pop("events", None) or {}))
     audio = AudioConfig(events=audio_events, **audio_raw)
 
+    drone = DroneConfig(**(raw.get("drone") or {}))
     database = DatabaseConfig(**(raw.get("database") or {}))
     vehicles = VehiclesConfig(**(raw.get("vehicles") or {}))
     transcription = TranscriptionConfig(**(raw.get("transcription") or {}))
@@ -265,6 +292,7 @@ def load_config(path: str = DEFAULT_CONFIG_PATH) -> Config:
         cameras=cameras,
         fusion=fusion,
         audio=audio,
+        drone=drone,
         database=database,
         vehicles=vehicles,
         transcription=transcription,

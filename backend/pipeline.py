@@ -294,7 +294,7 @@ class Pipeline:
             detector.cfg.imgsz = imgsz
             detector.cfg.confidence = conf
             dets = detector.detect(frame)
-            dets = self._maybe_open_vocab(detector.device, frame, imgsz, dets, vs)
+            dets = self._maybe_open_vocab(detector.device, frame, imgsz, dets)
 
             veh = self.settings.get("vehicles", default={}) or {}
             world: list[WorldDetection] = []
@@ -321,21 +321,66 @@ class Pipeline:
             if elapsed < interval:
                 self._stop.wait(interval - elapsed)
 
+    @staticmethod
+    def _drone_conf(sensitivity: float) -> float:
+        """Map drone sensitivity (0..1) to a (low) confidence threshold."""
+        return max(0.03, 0.25 * (1.0 - float(sensitivity)))
+
     def _maybe_open_vocab(self, device: str, frame: np.ndarray, imgsz: int,
-                          dets: list[Detection], vs: dict) -> list[Detection]:
-        ov = vs.get("open_vocabulary", {}) or {}
-        if not ov.get("enabled"):
+                          dets: list[Detection]) -> list[Detection]:
+        ov = self.settings.get("video", "open_vocabulary", default={}) or {}
+        drone = self.settings.get("drone", default={}) or {}
+        drone_visual = bool(drone.get("enabled") and drone.get("visual"))
+        if not ov.get("enabled") and not drone_visual:
             return dets
-        prompts = ov.get("prompts") or self.cfg.detection.open_vocabulary.prompts
+
+        prompts: list[str] = []
+        conf = ov.get("confidence")
+        if ov.get("enabled"):
+            prompts += ov.get("prompts") or self.cfg.detection.open_vocabulary.prompts
+        if drone_visual:
+            prompts += self.cfg.drone.prompts
+            dconf = self._drone_conf(drone.get("sensitivity", self.cfg.drone.sensitivity))
+            conf = dconf if conf is None else min(conf, dconf)
+        prompts = list(dict.fromkeys(p for p in prompts if p))  # dedupe, keep order
         det = self._get_open_vocab(device, prompts)
         if det is None:
             return dets
         try:
-            extra = det.detect(frame, imgsz, ov.get("confidence"))
+            extra = det.detect(frame, imgsz, conf)
             return merge_detections(dets, extra)
         except Exception as exc:  # pragma: no cover
             logger.warning("open-vocab detect failed: %s", exc)
             return dets
+
+    def _apply_group_min_cameras(self) -> None:
+        """Drones confirm with fewer cameras (sky-facing single view)."""
+        drone = self.settings.get("drone", default={}) or {}
+        if drone.get("enabled"):
+            self.fusion.min_cameras_by_group["drone"] = int(self.cfg.drone.min_cameras)
+        else:
+            self.fusion.min_cameras_by_group.pop("drone", None)
+
+    def _attach_drone_audio(self, objs: list[dict]) -> None:
+        """Fuse acoustic evidence onto drone tracks (visual + audio)."""
+        drone = self.settings.get("drone", default={}) or {}
+        if not (drone.get("enabled") and drone.get("fuse")):
+            return
+        sens = float(drone.get("sensitivity", self.cfg.drone.sensitivity))
+        hi_thr = 0.45 * (1.0 - sens) + 0.15
+        audio = self.audio.results()
+        heard = False
+        for a in audio.values():
+            if any(e.get("type") == "drone" for e in a.get("events", [])):
+                heard = True
+            if a.get("bands", {}).get("high", 0.0) >= hi_thr and a.get("level", 0) > 0.05:
+                heard = True
+        if not heard:
+            return
+        for o in objs:
+            if o.get("class") == "drone":
+                o["drone_audio"] = True
+                o["sources"] = ["visual", "audio"]
 
     def _fusion_loop(self) -> None:
         while not self._stop.is_set():
@@ -345,12 +390,14 @@ class Pipeline:
                     dets.extend(d)
             self.fusion.min_cameras = int(self.settings.get(
                 "video", "min_cameras", default=self.cfg.fusion.min_cameras))
+            self._apply_group_min_cameras()
             tracks = self.fusion.update(dets)
             self._attach_engine_type(tracks)
             if (self.settings.get("vehicles", "enabled", default=False)):
                 self._apply_vehicles(tracks)
             objs = [t.to_dict() for t in tracks]
             self._attach_speech(objs)
+            self._attach_drone_audio(objs)
             with self._lock:
                 self._objects = objs
             if self.db is not None and self.settings.get("database", "enabled", default=True):
@@ -493,7 +540,8 @@ class Pipeline:
                 t.engine_type = engine
 
     # -- demo path ---------------------------------------------------------
-    def _synthetic_objects(self, t: float, include_open_vocab: bool
+    def _synthetic_objects(self, t: float, include_open_vocab: bool,
+                           drone_mode: bool = False
                            ) -> list[tuple[str, int, float, float, float]]:
         """Return synthetic (class, class_id, X, Y, conf) over the courtyard."""
         objs = []
@@ -513,7 +561,13 @@ class Pipeline:
             objs.append(("trash bin", 1000, 10.8, 6.6, 0.55))   # static
             sx = 3.0 + (math.cos(t * 0.7) * 0.5 + 0.5) * 6.0
             objs.append(("scooter", 1001, sx, 5.5, 0.5))
-            objs.append(("drone", 1003, 7.0 + 3 * math.cos(t * 0.9), 1.0, 0.45))
+        if drone_mode or include_open_vocab:
+            # Two distinct drones on different flight paths (trajectory demo).
+            objs.append(("drone", 1003, 7.0 + 3 * math.cos(t * 0.9),
+                         3.0 + 2 * math.sin(t * 0.9), 0.5))
+        if drone_mode:
+            objs.append(("drone", 1004, 4.0 + 4 * math.sin(t * 0.5),
+                         6.0 + 1.5 * math.cos(t * 0.7), 0.45))
         return objs
 
     def _demo_loop(self) -> None:
@@ -529,12 +583,14 @@ class Pipeline:
             attrs = self.settings.get("attributes", default={}) or {}
             video_on = vs.get("enabled", True)
             ov_on = (vs.get("open_vocabulary", {}) or {}).get("enabled", False)
+            drone_on = bool((self.settings.get("drone", default={}) or {}).get("enabled"))
 
             frames = {cid: img.copy() for cid, img in self.base_frames.items()}
             world_by_cam: dict[str, list[WorldDetection]] = {c.id: [] for c in self.cfg.cameras}
 
             if video_on:
-                objs = self._synthetic_objects(t, include_open_vocab=ov_on)
+                objs = self._synthetic_objects(t, include_open_vocab=ov_on,
+                                               drone_mode=drone_on)
                 for cam in self.cfg.cameras:
                     Hinv = self._inv_homography.get(cam.id)
                     if Hinv is None:
@@ -561,6 +617,7 @@ class Pipeline:
             dets = [d for lst in world_by_cam.values() for d in lst]
             self.fusion.min_cameras = int(self.settings.get(
                 "video", "min_cameras", default=self.cfg.fusion.min_cameras))
+            self._apply_group_min_cameras()
             tracks = self.fusion.update(dets)
             self._attach_engine_type(tracks)
             if attrs.get("age"):
@@ -569,6 +626,11 @@ class Pipeline:
                 self._apply_demo_vehicles(tracks)
             objs = [tr.to_dict() for tr in tracks]
             self._attach_speech(objs)
+            if drone_on:
+                for o in objs:
+                    if o.get("class") == "drone":
+                        o["drone_audio"] = True
+                        o["sources"] = ["visual", "audio"]
             with self._lock:
                 for cid, fr in frames.items():
                     self._annotated[cid] = _encode_jpeg(fr)

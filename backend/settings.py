@@ -64,6 +64,13 @@ class Settings:
                 "plates": cfg.vehicles.plates,
                 "make_model": cfg.vehicles.make_model,
             },
+            "drone": {
+                "enabled": cfg.drone.enabled,
+                "visual": cfg.drone.visual,
+                "audio": cfg.drone.audio,
+                "fuse": cfg.drone.fuse,
+                "sensitivity": cfg.drone.sensitivity,
+            },
             "transcription": {
                 "enabled": cfg.transcription.enabled,
                 "diarization": cfg.transcription.diarization,
