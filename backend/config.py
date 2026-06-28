@@ -167,6 +167,14 @@ class LoggingConfig:
 
 
 @dataclass
+class ReportConfig:
+    enabled: bool = True
+    dir: str = "data/report"
+    snapshot_interval_s: float = 120.0   # how often to save a snapshot per camera
+    max_images_per_day: int = 240        # cap stored snapshots per day
+
+
+@dataclass
 class CalibrationConfig:
     dir: str = "data/calibration"
 
@@ -184,6 +192,7 @@ class Config:
     vehicles: VehiclesConfig = field(default_factory=VehiclesConfig)
     transcription: TranscriptionConfig = field(default_factory=TranscriptionConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    report: ReportConfig = field(default_factory=ReportConfig)
     calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
     path: str = DEFAULT_CONFIG_PATH
 
@@ -229,6 +238,7 @@ def load_config(path: str = DEFAULT_CONFIG_PATH) -> Config:
     vehicles = VehiclesConfig(**(raw.get("vehicles") or {}))
     transcription = TranscriptionConfig(**(raw.get("transcription") or {}))
     logging_cfg = LoggingConfig(**(raw.get("logging") or {}))
+    report = ReportConfig(**(raw.get("report") or {}))
 
     calibration = CalibrationConfig(**(raw.get("calibration") or {}))
 
@@ -259,6 +269,7 @@ def load_config(path: str = DEFAULT_CONFIG_PATH) -> Config:
         vehicles=vehicles,
         transcription=transcription,
         logging=logging_cfg,
+        report=report,
         calibration=calibration,
         path=path,
     )

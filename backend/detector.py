@@ -44,18 +44,24 @@ class Detection:
         return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
 
 
-def resolve_device(requested: str) -> str:
-    """Map config device strings to an ultralytics device id."""
-    if requested and requested != "auto":
-        return requested
+def cuda_devices() -> list[str]:
+    """Return available CUDA device ids (empty list on CPU-only hosts)."""
     try:
         import torch
 
         if torch.cuda.is_available():
-            return "cuda:0"
+            return [f"cuda:{i}" for i in range(torch.cuda.device_count())]
     except Exception:  # pragma: no cover
         pass
-    return "cpu"
+    return []
+
+
+def resolve_device(requested: str) -> str:
+    """Map config device strings to an ultralytics device id."""
+    if requested and requested != "auto":
+        return requested
+    gpus = cuda_devices()
+    return gpus[0] if gpus else "cpu"
 
 
 class Detector:

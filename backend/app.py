@@ -27,6 +27,7 @@ from .geometry import build_intrinsics, camera_coverage
 from .logging_setup import set_level, setup_logging
 from .pipeline import Pipeline
 from .settings import Settings
+from .version import build_info
 
 FRONTEND_DIR = os.path.join(PROJECT_ROOT, "frontend")
 
@@ -119,6 +120,7 @@ def api_config() -> JSONResponse:
         "colors": {name: list(rgb) for name, rgb in CLASS_COLORS.items()},
         "labels": CLASS_LABELS_CS,
         "mode": MODE,
+        "build": build_info(),
         "features": {
             "database": cfg.database.enabled,
             "vehicles": cfg.vehicles.enabled,
@@ -231,6 +233,25 @@ def get_recording(name: str):
     if not os.path.exists(path):
         return JSONResponse({"error": "not found"}, status_code=404)
     return FileResponse(path, media_type="video/x-matroska", filename=name)
+
+
+@app.get("/api/report")
+def api_report(date: str | None = None) -> JSONResponse:
+    import time as _t
+    if pipeline is None:
+        return JSONResponse({"error": "pipeline not ready"}, status_code=503)
+    date = date or _t.strftime("%Y-%m-%d")
+    return JSONResponse(pipeline.report.report(date))
+
+
+@app.get("/report-image/{date}/{name}")
+def get_report_image(date: str, name: str):
+    if pipeline is None:
+        return JSONResponse({"error": "pipeline not ready"}, status_code=503)
+    path = pipeline.report.image_path(date, name)
+    if not path:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return FileResponse(path, media_type="image/jpeg")
 
 
 @app.get("/api/state")

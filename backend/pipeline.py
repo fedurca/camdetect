@@ -28,11 +28,12 @@ from .cameras import CameraManager
 from .classes import color_for, label_cs
 from .config import PROJECT_ROOT, Config
 from .db import Database
-from .detector import (Detection, Detector, OpenVocabDetector, merge_detections,
-                       resolve_device)
+from .detector import (Detection, Detector, OpenVocabDetector, cuda_devices,
+                       merge_detections, resolve_device)
 from .fusion import Fusion, WorldDetection
 from .geometry import camera_coverage, in_coverage
 from .recorder import RecordingManager
+from .report import ReportManager
 from .settings import Settings
 from .transcribe import TranscriptionManager
 from .vehicles import VehicleAnalyzer, VehicleInfo
@@ -129,6 +130,10 @@ class Pipeline:
             cfg, mode, get_jpeg=self.latest_jpeg, get_state=self.get_state,
             url_for=lambda cid: (self.cfg.camera(cid).url if self.cfg.camera(cid) else None))
 
+        # Daily report (snapshots + text summary).
+        self.report = ReportManager(cfg, get_jpeg=self.latest_jpeg,
+                                    cameras=cfg.cameras, db=self.db)
+
         if mode == "live":
             self.detectors = self._build_detectors()
             self.manager = CameraManager(cfg.cameras)
@@ -137,15 +142,34 @@ class Pipeline:
             self._inv_homography = self._build_inverse_homographies()
 
     # -- setup -------------------------------------------------------------
+    def _device_for(self, cam, gpus: list[str], idx: int) -> str:
+        """Resolve a camera's device, spreading cameras across all GPUs.
+
+        Explicit per-camera ``device`` wins. Otherwise, when the global device
+        is ``auto`` and multiple CUDA GPUs exist, cameras are assigned
+        round-robin (cuda:0, cuda:1, ...) so the load is split across both GPUs.
+        """
+        if cam.device:
+            return cam.device
+        if self.cfg.detection.device == "auto" and gpus:
+            return gpus[idx % len(gpus)]
+        return resolve_device(self.cfg.detection.device)
+
     def _build_detectors(self) -> dict[str, Detector]:
         """One Detector per unique resolved device, shared across cameras."""
+        gpus = cuda_devices()
+        if gpus:
+            logger.info("CUDA GPUs available: %s", ", ".join(gpus))
+        else:
+            logger.info("No CUDA GPU - running detection on CPU")
         by_device: dict[str, Detector] = {}
         mapping: dict[str, Detector] = {}
-        for cam in self.cfg.cameras:
-            dev = resolve_device(cam.device or self.cfg.detection.device)
+        for idx, cam in enumerate(self.cfg.cameras):
+            dev = self._device_for(cam, gpus, idx)
             if dev not in by_device:
                 by_device[dev] = Detector(self.cfg.detection, device=dev)
             mapping[cam.id] = by_device[dev]
+            logger.info("Camera %s -> %s", cam.id, dev)
         return mapping
 
     def _get_open_vocab(self, device: str, prompts: list[str]) -> Optional[OpenVocabDetector]:
@@ -204,6 +228,7 @@ class Pipeline:
             self.db.start()
         self.audio.start()
         self.transcription.start()
+        self.report.start()
         if self.mode == "live":
             self.manager.start()
             for cam in self.cfg.cameras:
@@ -221,6 +246,7 @@ class Pipeline:
 
     def stop(self) -> None:
         self._stop.set()
+        self.report.stop()
         self.recorder.stop_all()
         self.transcription.stop()
         self.audio.stop()

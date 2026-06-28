@@ -228,6 +228,45 @@ class Database:
             out.append(d)
         return out
 
+    def summary(self, t0: float, t1: float) -> dict:
+        """Aggregate objects/events between two epoch times (for daily report)."""
+        conn = self._read_conn()
+        try:
+            by_class = {r[0]: r[1] for r in conn.execute(
+                "SELECT class, COUNT(*) FROM objects WHERE last_seen>=? AND "
+                "last_seen<? GROUP BY class ORDER BY 2 DESC", (t0, t1)).fetchall()}
+            by_kind = {r[0]: r[1] for r in conn.execute(
+                "SELECT kind, COUNT(*) FROM events WHERE ts>=? AND ts<? "
+                "GROUP BY kind", (t0, t1)).fetchall()}
+            n_events = sum(by_kind.values())
+            by_hour = {r[0]: r[1] for r in conn.execute(
+                "SELECT strftime('%H', ts, 'unixepoch', 'localtime') h, COUNT(*) "
+                "FROM events WHERE ts>=? AND ts<? GROUP BY h ORDER BY 2 DESC",
+                (t0, t1)).fetchall()}
+            vehicles = []
+            for (a,) in conn.execute(
+                    "SELECT attrs FROM objects WHERE last_seen>=? AND last_seen<? "
+                    "AND class IN ('car','truck','bus')", (t0, t1)).fetchall():
+                try:
+                    at = json.loads(a) if a else {}
+                except Exception:
+                    at = {}
+                if at.get("plate") or at.get("make"):
+                    vehicles.append({k: at.get(k) for k in
+                                     ("plate", "make", "model", "drivetrain")})
+            transcripts = []
+            for (d,) in conn.execute(
+                    "SELECT data FROM events WHERE kind='transcript' AND ts>=? "
+                    "AND ts<? ORDER BY ts DESC LIMIT 30", (t0, t1)).fetchall():
+                try:
+                    transcripts.append(json.loads(d) if d else {})
+                except Exception:
+                    pass
+        finally:
+            conn.close()
+        return {"by_class": by_class, "by_kind": by_kind, "n_events": n_events,
+                "by_hour": by_hour, "vehicles": vehicles, "transcripts": transcripts}
+
     def stats(self) -> dict:
         conn = self._read_conn()
         try:

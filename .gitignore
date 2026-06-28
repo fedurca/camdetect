@@ -25,6 +25,7 @@ data/snapshots/
 data/logs/
 data/audio/
 data/recordings/
+data/report/
 data/startup.json
 *.sqlite
 *.sqlite-journal

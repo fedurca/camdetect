@@ -206,5 +206,14 @@ logging:
   file: "data/logs/camdetect.log"
   max_lines: 2000
 
+# ---------------------------------------------------------------------------
+# Daily report: periodic snapshots + on-demand text summary.
+# ---------------------------------------------------------------------------
+report:
+  enabled: true
+  dir: "data/report"
+  snapshot_interval_s: 120.0
+  max_images_per_day: 240
+
 calibration:
   dir: "data/calibration"
