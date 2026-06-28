@@ -1,0 +1,46 @@
+{
+  "_comment": "Example ground correspondences for building per-camera calibrations. 'image' = pixel (u,v) in the camera snapshot of size 'image_size'. 'world' = (X,Y) meters on the courtyard ground plane (origin at cam2, derived from the Google Earth view, 14.6 m camera-triangle top edge). 'camera_marks' (optional) = pixels where the OTHER cameras appear (the red rectangles) with their world (X,Y,Z) position, used to refine PnP extrinsics. Replace these placeholders with real clicks via the interactive tool.",
+  "world": {
+    "reference_edge_m": 14.6,
+    "origin": "cam2"
+  },
+  "cameras": {
+    "cam2": {
+      "image_size": [1920, 1080],
+      "world_position": [0.0, 0.0, 3.0],
+      "correspondences": [
+        {"image": [300, 1000], "world": [2.0, 1.0]},
+        {"image": [1650, 980],  "world": [12.0, 1.5]},
+        {"image": [1380, 600],  "world": [11.0, 8.0]},
+        {"image": [520, 600],   "world": [3.0, 8.0]},
+        {"image": [950, 760],   "world": [7.0, 4.5]}
+      ],
+      "camera_marks": [
+        {"image": [445, 190], "world": [14.6, 0.0, 3.0]},
+        {"image": [560, 188], "world": [7.3, 8.0, 3.0]}
+      ]
+    },
+    "cam3": {
+      "image_size": [1920, 1080],
+      "world_position": [14.6, 0.0, 3.0],
+      "correspondences": [
+        {"image": [250, 950],  "world": [13.0, 1.5]},
+        {"image": [1500, 1000],"world": [4.0, 1.0]},
+        {"image": [1250, 560], "world": [5.0, 8.0]},
+        {"image": [600, 540],  "world": [12.0, 8.5]},
+        {"image": [900, 720],  "world": [8.0, 4.5]}
+      ]
+    },
+    "cam4": {
+      "image_size": [1920, 1080],
+      "world_position": [7.3, 8.0, 3.0],
+      "correspondences": [
+        {"image": [350, 1000], "world": [3.0, 7.0]},
+        {"image": [1600, 950], "world": [12.0, 7.5]},
+        {"image": [1300, 600], "world": [11.0, 1.5]},
+        {"image": [500, 620],  "world": [4.0, 1.0]},
+        {"image": [950, 780],  "world": [7.5, 4.0]}
+      ]
+    }
+  }
+}
