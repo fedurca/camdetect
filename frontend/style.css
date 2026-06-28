@@ -195,28 +195,36 @@ td a { color: var(--accent); }
 
 /* ----- mobile / responsive ----- */
 @media (max-width: 900px) {
-  #topbar { gap: 6px; padding: 6px 8px; }
-  .legend { display: none; }
-  #tabs { order: 5; width: 100%; overflow-x: auto; }
+  body { height: auto; min-height: 100%; }
+  #topbar { flex-wrap: wrap; gap: 6px; padding: 6px 8px; }
+  .legend, #ver { display: none; }
+  #tabs { order: 5; width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .view { overflow: visible; }
+
+  /* Live view: stack every panel full width (flex beats grid-area edge cases). */
   #view-live {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto auto auto;
-    grid-template-areas: "view3d" "topdown" "audio";
-    height: auto; min-height: calc(100vh - 60px);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px;
+    height: auto;
   }
-  body:not(.cameras-hidden) #view-live {
-    grid-template-rows: auto auto auto auto;
-    grid-template-areas: "cameras" "view3d" "topdown" "audio";
-  }
-  #cameras { flex-direction: column; height: auto; }
-  #cameras .panel { height: 200px; }
-  #panel-3d { height: 60vh; }
-  #panel-topdown { height: 50vh; }
-  #panel-audio { min-height: 320px; }
+  #view-live > .panel,
+  #view-live > .camera-row { width: 100%; flex: 0 0 auto; }
+
+  #cameras { flex-direction: column; height: auto; gap: 8px; }
+  #cameras .panel { width: 100%; height: 46vw; min-height: 170px; }
+  #panel-3d { height: 75vw; min-height: 300px; }
+  #panel-topdown { height: 85vw; min-height: 320px; }
+  #panel-audio { height: auto; min-height: 300px; }
+
   #audio-body { grid-template-columns: 1fr; }
-  #spectrogram, #freq { max-height: 140px; width: 100%; }
+  #spectrogram, #freq { width: 100%; max-height: 150px; }
+  #transcript { max-height: none; }
+
   .hist-cols, .debug-cols, .report-cols { grid-template-columns: 1fr; }
   .debug-cols { height: auto; }
   #debug-log, #events-log { height: 40vh; }
-  #ver { display: none; }
+  table { font-size: 11px; }
+  .hist-toolbar, .debug-toolbar, .rec-controls { flex-wrap: wrap; }
 }

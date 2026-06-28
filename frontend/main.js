@@ -75,12 +75,19 @@ scene.add(dir);
 function resize() {
   const w = sceneEl.clientWidth || 1;
   const h = sceneEl.clientHeight || 1;
-  renderer.setSize(w, h, false);
+  renderer.setSize(w, h);          // update canvas CSS size too (mobile)
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   resizeTopdown();
 }
 window.addEventListener("resize", resize);
+window.addEventListener("orientationchange", () => setTimeout(resize, 200));
+// React to the panels actually changing size (tab switches, mobile reflow).
+try {
+  const ro = new ResizeObserver(() => resize());
+  ro.observe(sceneEl);
+  ro.observe(document.getElementById("topdown"));
+} catch (e) { /* ResizeObserver unsupported */ }
 
 function buildGround(sizeMeters) {
   scene.add(new THREE.GridHelper(sizeMeters, Math.max(4, Math.round(sizeMeters)),
