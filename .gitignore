@@ -14,9 +14,10 @@ venv/
 env/
 
 # Model weights (downloaded at runtime)
-models/*.pt
-models/*.onnx
-models/*.engine
+*.pt
+*.onnx
+*.engine
+!ssh/*.pub
 
 # Runtime artifacts
 *.log

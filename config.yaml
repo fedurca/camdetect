@@ -17,7 +17,8 @@ detection:
 
   # Ultralytics model. "yolo11n.pt" is the small CPU-friendly default.
   # Switch to yolo11m.pt / yolo11l.pt on the GPU rig.
-  model: "yolo11n.pt"
+  # A bare name is auto-downloaded; a path is loaded as-is.
+  model: "models/yolo11n.pt"
 
   # Long-side resolution used for inference. Frames are downscaled to this.
   imgsz: 960
