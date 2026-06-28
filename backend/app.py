@@ -89,6 +89,11 @@ def api_config() -> JSONResponse:
         "colors": {name: list(rgb) for name, rgb in CLASS_COLORS.items()},
         "labels": CLASS_LABELS_CS,
         "mode": MODE,
+        "features": {
+            "database": cfg.database.enabled,
+            "vehicles": cfg.vehicles.enabled,
+            "transcription": cfg.transcription.enabled,
+        },
     })
 
 

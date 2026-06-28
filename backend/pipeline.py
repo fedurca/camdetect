@@ -27,12 +27,17 @@ from .calibration import CalibrationStore
 from .cameras import CameraManager
 from .classes import color_for, label_cs
 from .config import PROJECT_ROOT, Config
+from .db import Database
 from .detector import (Detection, Detector, OpenVocabDetector, merge_detections,
                        resolve_device)
 from .fusion import Fusion, WorldDetection
 from .settings import Settings
+from .transcribe import TranscriptionManager
+from .vehicles import VehicleAnalyzer, VehicleInfo
 
 logger = logging.getLogger(__name__)
+
+VEHICLE_CLASSES = {"car", "truck", "bus"}
 
 
 def _bgr(rgb: tuple[int, int, int]) -> tuple[int, int, int]:
@@ -88,6 +93,22 @@ class Pipeline:
 
         # Audio subsystem (runs in both live and demo).
         self.audio = AudioManager(cfg.cameras, cfg.audio, self.settings, mode=mode)
+
+        # Local database (objects + events).
+        self.db: Optional[Database] = None
+        if cfg.database.enabled:
+            self.db = Database(cfg.abspath(cfg.database.path),
+                               merge_distance_m=cfg.database.merge_distance_m,
+                               merge_time_s=cfg.database.merge_time_s,
+                               retention_days=cfg.database.retention_days)
+
+        # Transcription (uses the audio ring buffers).
+        self.transcription = TranscriptionManager(self.audio, cfg.transcription,
+                                                  self.settings, mode=mode, db=self.db)
+
+        # Vehicle analyzer (ANPR + make/model) and recent observations buffer.
+        self.vehicle = VehicleAnalyzer(cfg.vehicles.ocr_backend)
+        self._vehicle_obs: list[tuple[float, float, VehicleInfo, float]] = []
 
         if mode == "live":
             self.detectors = self._build_detectors()
@@ -160,7 +181,10 @@ class Pipeline:
 
     # -- lifecycle ---------------------------------------------------------
     def start(self) -> None:
+        if self.db is not None:
+            self.db.start()
         self.audio.start()
+        self.transcription.start()
         if self.mode == "live":
             self.manager.start()
             for cam in self.cfg.cameras:
@@ -178,7 +202,10 @@ class Pipeline:
 
     def stop(self) -> None:
         self._stop.set()
+        self.transcription.stop()
         self.audio.stop()
+        if self.db is not None:
+            self.db.stop()
         if self.mode == "live":
             self.manager.stop()
         for t in self._threads:
@@ -223,6 +250,7 @@ class Pipeline:
             dets = detector.detect(frame)
             dets = self._maybe_open_vocab(detector.device, frame, imgsz, dets, vs)
 
+            veh = self.settings.get("vehicles", default={}) or {}
             world: list[WorldDetection] = []
             for d in dets:
                 draw_detection(frame, label_cs(d.class_name), d.confidence, d.bbox,
@@ -232,6 +260,8 @@ class Pipeline:
                     X, Y = calib.image_to_world(fx, fy, (w, h))
                     world.append(WorldDetection(cam_id, d.class_id, d.class_name,
                                                 d.confidence, X, Y))
+                    if veh.get("enabled") and d.class_name in VEHICLE_CLASSES:
+                        self._analyze_vehicle(frame, d, X, Y, veh)
             with self._lock:
                 self._annotated[cam_id] = _encode_jpeg(frame)
                 self._world_dets[cam_id] = world
@@ -263,9 +293,72 @@ class Pipeline:
                     dets.extend(d)
             tracks = self.fusion.update(dets)
             self._attach_engine_type(tracks)
+            if (self.settings.get("vehicles", "enabled", default=False)):
+                self._apply_vehicles(tracks)
+            objs = [t.to_dict() for t in tracks]
             with self._lock:
-                self._objects = [t.to_dict() for t in tracks]
+                self._objects = objs
+            if self.db is not None and self.settings.get("database", "enabled", default=True):
+                self.db.ingest(objs)
             self._stop.wait(0.1)
+
+    def _analyze_vehicle(self, frame: np.ndarray, d: Detection, X: float, Y: float,
+                         veh: dict) -> None:
+        """Run ANPR / make-model on a car crop; buffer the result by world pos."""
+        x1, y1, x2, y2 = (int(v) for v in d.bbox)
+        crop = frame[max(0, y1):max(0, y2), max(0, x1):max(0, x2)]
+        if crop.size == 0:
+            return
+        info = VehicleInfo()
+        try:
+            if veh.get("plates") and self.vehicle.plates_available:
+                pr = self.vehicle.read_plate(crop)
+                if pr:
+                    info.plate, info.plate_conf = pr
+            if veh.get("make_model"):
+                mm = self.vehicle.estimate_make_model(crop)
+                info.make, info.model = mm.make, mm.model
+                info.vehicle_age, info.drivetrain = mm.vehicle_age, mm.drivetrain
+        except Exception as exc:  # pragma: no cover
+            logger.debug("vehicle analyze failed: %s", exc)
+            return
+        if info.to_attrs():
+            self._vehicle_obs.append((X, Y, info, time.time()))
+            self._vehicle_obs = self._vehicle_obs[-50:]
+
+    def _apply_vehicles(self, tracks) -> None:
+        """Attach buffered vehicle info to the nearest car track."""
+        now = time.time()
+        obs = [o for o in self._vehicle_obs if now - o[3] < 5.0]
+        for t in tracks:
+            if t.class_name not in VEHICLE_CLASSES:
+                continue
+            best = None
+            best_d = 4.0
+            for (ox, oy, info, _ts) in obs:
+                dd = math.hypot(t.x - ox, t.y - oy)
+                if dd < best_d:
+                    best_d, best = dd, info
+            if best:
+                t.plate = best.plate or t.plate
+                t.make = best.make or t.make
+                t.model = best.model or t.model
+                t.vehicle_age = best.vehicle_age or t.vehicle_age
+                t.drivetrain = best.drivetrain or t.drivetrain
+
+    @staticmethod
+    def _apply_demo_vehicles(tracks) -> None:
+        """Synthetic, stable vehicle attributes per car track (demo only)."""
+        makes = [("Skoda", "Octavia", "~2019", "diesel"),
+                 ("Skoda", "Fabia", "~2015", "benzin"),
+                 ("Tesla", "Model 3", "~2022", "elektro"),
+                 ("VW", "Golf", "~2017", "benzin")]
+        for t in tracks:
+            if t.class_name in VEHICLE_CLASSES:
+                mk, md, ag, dt = makes[t.id % len(makes)]
+                t.make, t.model, t.vehicle_age, t.drivetrain = mk, md, ag, dt
+                if not t.plate:
+                    t.plate = f"{t.id % 9 + 1}{chr(65 + t.id % 26)}{t.id % 9} {1000 + t.id % 9000}"
 
     def _attach_engine_type(self, tracks) -> None:
         """Tag motorcycle/car tracks with the 2T/4T type from audio, if any."""
@@ -352,10 +445,15 @@ class Pipeline:
             self._attach_engine_type(tracks)
             if attrs.get("age"):
                 self._apply_demo_age(tracks)
+            if (self.settings.get("vehicles", "enabled", default=False)):
+                self._apply_demo_vehicles(tracks)
+            objs = [tr.to_dict() for tr in tracks]
             with self._lock:
                 for cid, fr in frames.items():
                     self._annotated[cid] = _encode_jpeg(fr)
-                self._objects = [tr.to_dict() for tr in tracks]
+                self._objects = objs
+            if self.db is not None and self.settings.get("database", "enabled", default=True):
+                self.db.ingest(objs)
             self._stop.wait(interval)
 
     @staticmethod
@@ -383,5 +481,44 @@ class Pipeline:
             "objects": objects,
             "cameras": cameras,
             "audio": self.audio.results(),
+            "transcripts": self.transcription.results(),
             "ts": time.time(),
         }
+
+    def benchmark(self, frames: int = 20) -> dict:
+        """Report compute device and a quick inference FPS estimate."""
+        info: dict = {"cuda": False, "device": "cpu", "gpus": []}
+        try:
+            import torch
+            info["torch"] = torch.__version__
+            if torch.cuda.is_available():
+                info["cuda"] = True
+                info["device"] = "cuda:0"
+                info["gpus"] = [torch.cuda.get_device_name(i)
+                                for i in range(torch.cuda.device_count())]
+        except Exception:  # pragma: no cover
+            pass
+
+        # Build/grab a detector and time inference on a dummy frame.
+        try:
+            from .detector import Detector
+            det = (self.detectors.get(self.cfg.cameras[0].id)
+                   if self.mode == "live" and getattr(self, "detectors", None)
+                   else Detector(self.cfg.detection,
+                                 device=info["device"] if info["cuda"] else "cpu"))
+            imgsz = int(self.settings.get("video", "imgsz", default=self.cfg.detection.imgsz))
+            dummy = np.random.randint(0, 255, (1080, 1920, 3), dtype=np.uint8)
+            det.detect(dummy)  # warmup
+            t0 = time.time()
+            for _ in range(max(1, frames)):
+                det.detect(dummy)
+            dt = time.time() - t0
+            fps = frames / dt if dt > 0 else 0.0
+            info["model"] = self.cfg.detection.model
+            info["imgsz"] = imgsz
+            info["fps_single"] = round(fps, 2)
+            info["latency_ms"] = round(dt / frames * 1000, 1)
+            info["suggested_fps"] = round(min(fps / max(1, len(self.cfg.cameras)), 30), 1)
+        except Exception as exc:  # pragma: no cover
+            info["error"] = str(exc)
+        return info

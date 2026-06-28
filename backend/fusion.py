@@ -57,6 +57,12 @@ class Track:
     age: Optional[str] = None          # experimental, from attributes module
     age_conf: float = 0.0
     engine_type: Optional[str] = None  # 2T / 4T / unknown (from audio)
+    # vehicle attributes (cars)
+    plate: Optional[str] = None
+    make: Optional[str] = None
+    model: Optional[str] = None
+    vehicle_age: Optional[str] = None
+    drivetrain: Optional[str] = None
 
     def update_motion(self, now: float) -> None:
         """Recompute speed and behavior from recent history."""
@@ -110,6 +116,10 @@ class Track:
             d["age_conf"] = round(self.age_conf, 2)
         if self.engine_type:
             d["engine_type"] = self.engine_type
+        for k in ("plate", "make", "model", "vehicle_age", "drivetrain"):
+            v = getattr(self, k)
+            if v:
+                d[k] = v
         return d
 
 

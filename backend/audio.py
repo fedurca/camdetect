@@ -224,6 +224,10 @@ class AudioAnalyzer:
         self._ring[-n:] = samples
         self._filled = min(self.window, self._filled + n)
 
+    def get_samples(self) -> tuple[np.ndarray, int]:
+        """Return a copy of the current ring buffer and its sample rate."""
+        return self._ring.copy(), self.sr
+
     # -- spectrogram -------------------------------------------------------
     def _stft_power(self) -> np.ndarray:
         """Return log power spectrogram, shape (n_bins, n_frames)."""
