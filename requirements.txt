@@ -1,0 +1,14 @@
+# camdetect - multi-camera 3D object detection web app
+# Python 3.11+
+
+# Web server
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# Computer vision / detection
+opencv-python==4.10.0.84
+numpy==1.26.4
+ultralytics==8.3.58
+
+# Config / utilities
+PyYAML==6.0.2

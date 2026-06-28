@@ -1,0 +1,93 @@
+# camdetect configuration
+#
+# All distances are in meters. The world coordinate frame is a local metric
+# plane derived from the Google Earth top-down view (see calibration docs).
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+
+# ---------------------------------------------------------------------------
+# Compute / detection
+# ---------------------------------------------------------------------------
+detection:
+  # "auto" picks cuda when available, otherwise cpu.
+  # For the future multi-GPU box you can override per camera (see cameras[].device).
+  device: "auto"
+
+  # Ultralytics model. "yolo11n.pt" is the small CPU-friendly default.
+  # Switch to yolo11m.pt / yolo11l.pt on the GPU rig.
+  model: "yolo11n.pt"
+
+  # Long-side resolution used for inference. Frames are downscaled to this.
+  imgsz: 960
+
+  # Minimum confidence for a detection to be kept.
+  confidence: 0.35
+
+  # Target inference rate per camera (frames/second). CPU: keep low.
+  fps: 3
+
+  # COCO class ids to keep. Aligns with the cameras' smart detections:
+  # person(0), bicycle(1), car(2), motorcycle(3), bus(5), truck(7),
+  # plus common animals: bird(14), cat(15), dog(16), horse(17), sheep(18),
+  # cow(19), elephant(20), bear(21), zebra(22), giraffe(23).
+  classes: [0, 1, 2, 3, 5, 7, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+
+# ---------------------------------------------------------------------------
+# Camera intrinsics (shared - all 3 are identical UniFi G5 Bullet 2K)
+# Used to build K and for solvePnP / frustum rendering.
+# ---------------------------------------------------------------------------
+intrinsics:
+  width: 2688
+  height: 1512
+  fov_horizontal_deg: 84.4
+  fov_vertical_deg: 45.4
+
+# ---------------------------------------------------------------------------
+# World frame
+# Scale reference: the measured top edge of the camera triangle (Google Earth).
+# ---------------------------------------------------------------------------
+world:
+  # Length in meters of the reference edge used when building the world frame
+  # in the calibration tool.
+  reference_edge_m: 14.6
+  # Ground elevation (m) from Google Earth, informational.
+  ground_elevation_m: 224.88
+
+# ---------------------------------------------------------------------------
+# Cameras
+# world_xy / height_m are filled in during calibration (Google Earth vertices).
+# ---------------------------------------------------------------------------
+cameras:
+  - id: "cam2"
+    url: "rtsp://10.24.0.1:7447/xZKYcjSJaXphYyGh"
+    device: null        # null -> use detection.device
+    world_xy: [0.0, 0.0]
+    height_m: 3.0
+  - id: "cam3"
+    url: "rtsp://10.24.0.1:7447/7rn46ON9DHj3foCA"
+    device: null
+    world_xy: [14.6, 0.0]
+    height_m: 3.0
+  - id: "cam4"
+    url: "rtsp://10.24.0.1:7447/ju7y75gaii2ME5TM"
+    device: null
+    world_xy: [7.3, 8.0]
+    height_m: 3.0
+
+# ---------------------------------------------------------------------------
+# Fusion / tracking (world coordinates, meters)
+# ---------------------------------------------------------------------------
+fusion:
+  # Detections within this distance (m) are merged into one physical object.
+  merge_distance_m: 1.5
+  # Track is dropped after this many seconds without an update.
+  max_age_s: 2.0
+  # Position smoothing factor (0..1); higher = snappier, lower = smoother.
+  smoothing: 0.5
+  # Default assumed object height (m) for 3D boxes when class height unknown.
+  default_height_m: 1.7
+
+calibration:
+  dir: "data/calibration"
