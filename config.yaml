@@ -1,5 +1,14 @@
 # camdetect configuration
 #
+# This is the SINGLE committed config of record: camera stream URLs, their
+# mutual positions, detection/audio/db/logging settings - everything lives here
+# and is versioned in git (committed to main).
+#
+# Runtime tweaks made in the UI (and the benchmark "save as startup default")
+# are persisted separately to data/startup.json (gitignored, machine-specific)
+# and overlaid on top of this file at startup. Delete that file to fall back to
+# these committed defaults.
+#
 # All distances are in meters. The world coordinate frame is a local metric
 # plane derived from the Google Earth top-down view (see calibration docs).
 
@@ -132,6 +141,49 @@ audio:
   events:
     enabled: false     # sound-event classifier (heavy) -> default OFF on CPU
     model: "panns_cnn14"
+
+# ---------------------------------------------------------------------------
+# Local object/event database (SQLite)
+# ---------------------------------------------------------------------------
+database:
+  enabled: true
+  path: "data/camdetect.sqlite"
+  # Observations of the same class within this distance/time are merged.
+  merge_distance_m: 3.0
+  merge_time_s: 60.0
+  retention_days: 30
+
+# ---------------------------------------------------------------------------
+# Vehicle analysis (license plate + make/model/age/drivetrain) - experimental,
+# needs OCR / classifier models; OFF by default (heavy). Synthetic in demo mode.
+# ---------------------------------------------------------------------------
+vehicles:
+  enabled: false
+  plates: true
+  make_model: true
+  ocr_backend: "easyocr"
+
+# ---------------------------------------------------------------------------
+# Audio transcription + speaker diarization (Czech) - experimental, heavy.
+# OFF by default; recommended on GPU. Synthetic transcript in demo mode.
+# ---------------------------------------------------------------------------
+transcription:
+  enabled: false
+  language: "cs"
+  model: "small"        # faster-whisper model size (tiny/base/small/medium)
+  diarization: false
+  record: false
+  record_dir: "data/audio"
+  segment_s: 6.0
+
+# ---------------------------------------------------------------------------
+# Logging (file + in-app debug window). Level can be overridden at startup via
+# CAMDETECT_LOG_LEVEL or --log-level.
+# ---------------------------------------------------------------------------
+logging:
+  level: "INFO"
+  file: "data/logs/camdetect.log"
+  max_lines: 2000
 
 calibration:
   dir: "data/calibration"

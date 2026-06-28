@@ -112,6 +112,47 @@ class AudioConfig:
 
 
 @dataclass
+class DatabaseConfig:
+    enabled: bool = True
+    path: str = "data/camdetect.sqlite"
+    # Two observations of the same class within this distance and time gap are
+    # treated as the same physical object (merged).
+    merge_distance_m: float = 3.0
+    merge_time_s: float = 60.0
+    retention_days: int = 30
+
+
+@dataclass
+class VehiclesConfig:
+    """License-plate reading + make/model/age/drivetrain (experimental)."""
+
+    enabled: bool = False
+    plates: bool = True       # ANPR (needs OCR backend; experimental)
+    make_model: bool = True   # make/model/age/drivetrain (needs a classifier)
+    ocr_backend: str = "easyocr"  # informational; pluggable
+
+
+@dataclass
+class TranscriptionConfig:
+    """Audio recording + Czech transcription + speaker diarization."""
+
+    enabled: bool = False
+    language: str = "cs"
+    model: str = "small"      # faster-whisper model size
+    diarization: bool = False
+    record: bool = False
+    record_dir: str = "data/audio"
+    segment_s: float = 6.0    # transcription chunk length
+
+
+@dataclass
+class LoggingConfig:
+    level: str = "INFO"
+    file: str = "data/logs/camdetect.log"
+    max_lines: int = 2000     # in-memory ring buffer for the debug window
+
+
+@dataclass
 class CalibrationConfig:
     dir: str = "data/calibration"
 
@@ -125,8 +166,15 @@ class Config:
     cameras: list[CameraConfig] = field(default_factory=list)
     fusion: FusionConfig = field(default_factory=FusionConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
+    database: DatabaseConfig = field(default_factory=DatabaseConfig)
+    vehicles: VehiclesConfig = field(default_factory=VehiclesConfig)
+    transcription: TranscriptionConfig = field(default_factory=TranscriptionConfig)
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
     calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
     path: str = DEFAULT_CONFIG_PATH
+
+    def abspath(self, p: str) -> str:
+        return p if os.path.isabs(p) else os.path.join(PROJECT_ROOT, p)
 
     @property
     def calibration_dir(self) -> str:
@@ -163,6 +211,11 @@ def load_config(path: str = DEFAULT_CONFIG_PATH) -> Config:
     audio_events = AudioEventsConfig(**(audio_raw.pop("events", None) or {}))
     audio = AudioConfig(events=audio_events, **audio_raw)
 
+    database = DatabaseConfig(**(raw.get("database") or {}))
+    vehicles = VehiclesConfig(**(raw.get("vehicles") or {}))
+    transcription = TranscriptionConfig(**(raw.get("transcription") or {}))
+    logging_cfg = LoggingConfig(**(raw.get("logging") or {}))
+
     calibration = CalibrationConfig(**(raw.get("calibration") or {}))
 
     cameras: list[CameraConfig] = []
@@ -185,6 +238,10 @@ def load_config(path: str = DEFAULT_CONFIG_PATH) -> Config:
         cameras=cameras,
         fusion=fusion,
         audio=audio,
+        database=database,
+        vehicles=vehicles,
+        transcription=transcription,
+        logging=logging_cfg,
         calibration=calibration,
         path=path,
     )

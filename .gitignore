@@ -22,6 +22,11 @@ env/
 # Runtime artifacts
 *.log
 data/snapshots/
+data/logs/
+data/audio/
+data/startup.json
+*.sqlite
+*.sqlite-journal
 
 # OS / editor
 .DS_Store

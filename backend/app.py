@@ -19,15 +19,13 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import logging_setup
 from .classes import CLASS_COLORS, CLASS_LABELS_CS
 from .config import PROJECT_ROOT, load_config
 from .geometry import build_intrinsics
+from .logging_setup import set_level, setup_logging
 from .pipeline import Pipeline
 from .settings import Settings
-
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-logger = logging.getLogger("camdetect")
 
 FRONTEND_DIR = os.path.join(PROJECT_ROOT, "frontend")
 
@@ -35,7 +33,12 @@ CONFIG_PATH = os.environ.get("CAMDETECT_CONFIG")
 MODE = os.environ.get("CAMDETECT_MODE", "live").lower()
 
 cfg = load_config(CONFIG_PATH) if CONFIG_PATH else load_config()
+setup_logging(cfg)
+logger = logging.getLogger("camdetect")
+
 settings = Settings(cfg)
+STARTUP_PATH = cfg.abspath("data/startup.json")
+settings.load_startup(STARTUP_PATH)
 pipeline: Pipeline | None = None
 
 
@@ -103,6 +106,38 @@ async def api_set_settings(request: Request) -> JSONResponse:
     if not isinstance(patch, dict):
         return JSONResponse({"error": "expected an object"}, status_code=400)
     return JSONResponse(settings.update(patch))
+
+
+@app.post("/api/settings/save-startup")
+def api_save_startup() -> JSONResponse:
+    """Persist current settings as the startup defaults for next launch."""
+    settings.save_startup(STARTUP_PATH)
+    return JSONResponse({"saved": True, "path": STARTUP_PATH})
+
+
+@app.get("/api/logs")
+def api_logs(after: int = 0, limit: int = 500) -> JSONResponse:
+    rh = logging_setup.ring_handler
+    items = rh.tail(after_seq=after, limit=limit) if rh else []
+    return JSONResponse({"logs": items, "level": logging.getLevelName(
+        logging.getLogger().level)})
+
+
+@app.post("/api/log-level")
+async def api_log_level(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    level = set_level(str(body.get("level", "INFO")))
+    return JSONResponse({"level": level})
+
+
+@app.get("/api/benchmark")
+def api_benchmark() -> JSONResponse:
+    if pipeline is None:
+        return JSONResponse({"error": "pipeline not ready"}, status_code=503)
+    return JSONResponse(pipeline.benchmark())
 
 
 @app.get("/api/state")

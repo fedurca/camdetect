@@ -8,10 +8,15 @@ each loop; the API writes partial updates.
 from __future__ import annotations
 
 import copy
+import json
+import logging
+import os
 import threading
 from typing import Any
 
 from .config import Config
+
+logger = logging.getLogger(__name__)
 
 
 def _deep_merge(base: dict, patch: dict) -> dict:
@@ -53,6 +58,19 @@ class Settings:
                 "window_s": a.window_s,
                 "hop_s": a.hop_s,
             },
+            "vehicles": {
+                "enabled": cfg.vehicles.enabled,
+                "plates": cfg.vehicles.plates,
+                "make_model": cfg.vehicles.make_model,
+            },
+            "transcription": {
+                "enabled": cfg.transcription.enabled,
+                "diarization": cfg.transcription.diarization,
+                "record": cfg.transcription.record,
+            },
+            "database": {
+                "enabled": cfg.database.enabled,
+            },
         }
         self._lock = threading.Lock()
 
@@ -74,3 +92,22 @@ class Settings:
                     return default
                 node = node[key]
             return copy.deepcopy(node)
+
+    # -- startup persistence ----------------------------------------------
+    def load_startup(self, path: str) -> None:
+        """Overlay machine-specific startup overrides (if the file exists)."""
+        if not os.path.exists(path):
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                self.update(json.load(fh))
+            logger.info("Loaded startup settings from %s", path)
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Failed to read startup settings %s: %s", path, exc)
+
+    def save_startup(self, path: str) -> None:
+        """Persist current settings as the startup defaults for next launch."""
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(self.snapshot(), fh, indent=2)
+        logger.info("Saved startup settings to %s", path)
