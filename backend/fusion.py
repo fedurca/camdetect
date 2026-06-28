@@ -127,6 +127,20 @@ def _dist(ax: float, ay: float, bx: float, by: float) -> float:
     return math.hypot(ax - bx, ay - by)
 
 
+# Classes that are frequently confused between cameras (a silver car seen as
+# car/truck/bus from different angles) are fused as one "vehicle" group so the
+# same physical object does not show up multiple times.
+CLASS_GROUPS = {
+    "car": "vehicle", "truck": "vehicle", "bus": "vehicle",
+}
+# Per-group merge radius multiplier (applied to the base merge distance).
+GROUP_RADIUS_MULT = {"vehicle": 3.0, "person": 1.6}
+
+
+def group_of(class_name: str) -> str:
+    return CLASS_GROUPS.get(class_name, class_name)
+
+
 @dataclass
 class _Cluster:
     x: float
@@ -135,6 +149,7 @@ class _Cluster:
     class_id: int
     confidence: float
     cameras: list[str]
+    group: str = ""
 
 
 class Fusion:
@@ -147,38 +162,57 @@ class Fusion:
         self.tracks: dict[int, Track] = {}
         self._ids = count(1)
 
-    # -- step 1: merge detections across cameras --------------------------
+    def _radius(self, group: str) -> float:
+        return self.merge_distance_m * GROUP_RADIUS_MULT.get(group, 1.0)
+
+    # -- step 1: merge detections across cameras (by group, agglomerative) -
     def _cluster(self, detections: list[WorldDetection]) -> list[_Cluster]:
-        clusters: list[_Cluster] = []
-        members: list[list[WorldDetection]] = []
+        # bucket detections by group
+        groups: dict[str, list[WorldDetection]] = {}
         for det in detections:
             if math.isnan(det.x) or math.isnan(det.y):
                 continue
-            placed = False
-            for i, c in enumerate(clusters):
-                # Only merge detections of the same class that are close.
-                if c.class_name == det.class_name and \
-                        _dist(c.x, c.y, det.x, det.y) <= self.merge_distance_m:
-                    members[i].append(det)
-                    placed = True
-                    break
-            if not placed:
-                clusters.append(_Cluster(det.x, det.y, det.class_name,
-                                         det.class_id, det.confidence, [det.camera_id]))
-                members.append([det])
+            groups.setdefault(group_of(det.class_name), []).append(det)
 
-        # Recompute cluster centroids/aggregates from members.
         out: list[_Cluster] = []
-        for mem in members:
-            n = len(mem)
-            cx = sum(m.x for m in mem) / n
-            cy = sum(m.y for m in mem) / n
-            conf = max(m.confidence for m in mem)
-            cams = sorted({m.camera_id for m in mem})
-            out.append(_Cluster(cx, cy, mem[0].class_name, mem[0].class_id, conf, cams))
+        for grp, dets in groups.items():
+            radius = self._radius(grp)
+            members = [[d] for d in dets]  # start: each detection its own cluster
+            cents = [(d.x, d.y) for d in dets]
+            # single-linkage agglomerative: merge nearest clusters within radius
+            merged = True
+            while merged and len(members) > 1:
+                merged = False
+                bi = bj = -1
+                bd = radius
+                for i in range(len(members)):
+                    for j in range(i + 1, len(members)):
+                        d = _dist(*cents[i], *cents[j])
+                        if d < bd:
+                            bd, bi, bj = d, i, j
+                if bi >= 0:
+                    members[bi].extend(members[bj])
+                    pts = members[bi]
+                    cents[bi] = (sum(p.x for p in pts) / len(pts),
+                                 sum(p.y for p in pts) / len(pts))
+                    del members[bj]; del cents[bj]
+                    merged = True
+
+            for pts, (cx, cy) in zip(members, cents):
+                # dominant class within the cluster by summed confidence
+                by_cls: dict[str, float] = {}
+                cid_for: dict[str, int] = {}
+                for p in pts:
+                    by_cls[p.class_name] = by_cls.get(p.class_name, 0.0) + p.confidence
+                    cid_for[p.class_name] = p.class_id
+                dom = max(by_cls, key=by_cls.get)
+                out.append(_Cluster(
+                    cx, cy, dom, cid_for[dom],
+                    max(p.confidence for p in pts),
+                    sorted({p.camera_id for p in pts}), grp))
         return out
 
-    # -- step 2: associate clusters with tracks ---------------------------
+    # -- step 2: associate clusters with tracks (by group) ----------------
     def update(self, detections: list[WorldDetection]) -> list[Track]:
         now = time.time()
         clusters = self._cluster(detections)
@@ -186,10 +220,10 @@ class Fusion:
         unmatched = set(self.tracks.keys())
         for cluster in clusters:
             best_id: Optional[int] = None
-            best_d = self.merge_distance_m * 1.5
+            best_d = self._radius(cluster.group)
             for tid in unmatched:
                 t = self.tracks[tid]
-                if t.class_name != cluster.class_name:
+                if group_of(t.class_name) != cluster.group:
                     continue
                 d = _dist(t.x, t.y, cluster.x, cluster.y)
                 if d < best_d:
@@ -202,6 +236,9 @@ class Fusion:
                 t.x = a * cluster.x + (1 - a) * t.x
                 t.y = a * cluster.y + (1 - a) * t.y
                 t.confidence = cluster.confidence
+                # adopt the higher-confidence label within the group
+                t.class_name = cluster.class_name
+                t.class_id = cluster.class_id
                 t.cameras = cluster.cameras
                 t.last_update = now
                 t.hits += 1
@@ -210,20 +247,15 @@ class Fusion:
             else:
                 tid = next(self._ids)
                 track = Track(
-                    id=tid,
-                    class_name=cluster.class_name,
-                    class_id=cluster.class_id,
-                    x=cluster.x,
-                    y=cluster.y,
-                    confidence=cluster.confidence,
+                    id=tid, class_name=cluster.class_name, class_id=cluster.class_id,
+                    x=cluster.x, y=cluster.y, confidence=cluster.confidence,
                     height=height_for(cluster.class_name, self.default_height_m),
-                    cameras=cluster.cameras,
-                    last_update=now,
-                    first_seen=now,
-                    hits=1,
+                    cameras=cluster.cameras, last_update=now, first_seen=now, hits=1,
                 )
                 track.update_motion(now)
                 self.tracks[tid] = track
+
+        self._dedupe_tracks()
 
         # -- step 3: drop stale tracks ------------------------------------
         for tid in list(self.tracks.keys()):
@@ -231,6 +263,36 @@ class Fusion:
                 del self.tracks[tid]
 
         return list(self.tracks.values())
+
+    def _dedupe_tracks(self) -> None:
+        """Collapse pre-existing tracks of the same group that drifted within
+        the merge radius into a single track (keeps the longer-lived id)."""
+        ids = sorted(self.tracks.keys())
+        removed: set[int] = set()
+        for i in range(len(ids)):
+            if ids[i] in removed:
+                continue
+            a = self.tracks[ids[i]]
+            for j in range(i + 1, len(ids)):
+                if ids[j] in removed:
+                    continue
+                b = self.tracks[ids[j]]
+                if group_of(a.class_name) != group_of(b.class_name):
+                    continue
+                if _dist(a.x, a.y, b.x, b.y) <= self._radius(group_of(a.class_name)):
+                    # keep the one with more hits (older/stronger), drop other
+                    keep, drop = (a, b) if a.hits >= b.hits else (b, a)
+                    keep.cameras = sorted(set(keep.cameras) | set(drop.cameras))
+                    keep.hits += drop.hits
+                    if drop.confidence > keep.confidence:
+                        keep.class_name = drop.class_name
+                        keep.class_id = drop.class_id
+                        keep.confidence = drop.confidence
+                    removed.add(drop.id)
+                    if drop.id == ids[i]:
+                        break
+        for rid in removed:
+            self.tracks.pop(rid, None)
 
     def active(self) -> list[Track]:
         return list(self.tracks.values())
