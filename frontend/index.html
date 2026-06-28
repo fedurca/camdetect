@@ -20,13 +20,18 @@
     <span id="mode" class="badge">--</span>
     <span id="conn" class="badge badge-off">pripojuji…</span>
     <span id="objcount" class="badge">0 objektu</span>
+    <nav id="tabs">
+      <button class="tab-btn active" data-tab="live">Zive</button>
+      <button class="tab-btn" data-tab="history">Historie</button>
+      <button class="tab-btn" data-tab="benchmark">Benchmark</button>
+      <button class="tab-btn" data-tab="debug">Debug</button>
+    </nav>
     <button id="btn-cameras" class="toolbtn">Nahledy kamer</button>
     <button id="btn-settings" class="toolbtn">Nastaveni</button>
     <span class="spacer"></span>
     <span id="legend" class="legend"></span>
   </header>
 
-  <!-- Settings drawer -->
   <section id="drawer" class="hidden">
     <div class="ctl-group">
       <h3>Video detekce</h3>
@@ -40,68 +45,105 @@
         </select>
       </label>
       <label class="row">Prah <input type="range" id="set-video-conf" min="0.1" max="0.9" step="0.05" /><span id="val-video-conf" class="val"></span></label>
-      <label class="row"><input type="checkbox" id="set-ov-enabled" /> Open-vocabulary (nezname objekty)</label>
-      <label class="col">Prompty (carkou):
-        <textarea id="set-ov-prompts" rows="2"></textarea>
-      </label>
+      <label class="row"><input type="checkbox" id="set-ov-enabled" /> Open-vocabulary</label>
+      <label class="col">Prompty:<textarea id="set-ov-prompts" rows="2"></textarea></label>
     </div>
-
     <div class="ctl-group">
-      <h3>Atributy osob</h3>
-      <label class="row"><input type="checkbox" id="set-attr-behavior" /> Chovani (pohyb)</label>
-      <label class="row"><input type="checkbox" id="set-attr-age" /> Odhad veku (experimentalni)</label>
+      <h3>Atributy / vozidla</h3>
+      <label class="row"><input type="checkbox" id="set-attr-behavior" /> Chovani</label>
+      <label class="row"><input type="checkbox" id="set-attr-age" /> Odhad veku (exp.)</label>
+      <label class="row"><input type="checkbox" id="set-veh-enabled" /> Analyza vozidel</label>
+      <label class="row"><input type="checkbox" id="set-veh-plates" /> SPZ (ANPR, exp.)</label>
+      <label class="row"><input type="checkbox" id="set-veh-makemodel" /> Vyrobce/model (exp.)</label>
     </div>
-
     <div class="ctl-group">
-      <h3>Zvukova detekce</h3>
+      <h3>Zvuk</h3>
       <label class="row"><input type="checkbox" id="set-audio-enabled" /> Zapnuto</label>
-      <label class="row"><input type="checkbox" id="set-audio-events" /> Klasifikace udalosti (narocne)</label>
-      <label class="row"><input type="checkbox" id="set-audio-engine" /> Rozliseni 2T/4T (exp.)</label>
+      <label class="row"><input type="checkbox" id="set-audio-events" /> Udalosti (narocne)</label>
+      <label class="row"><input type="checkbox" id="set-audio-engine" /> 2T/4T (exp.)</label>
       <label class="row">Okno (s) <input type="range" id="set-audio-window" min="0.5" max="4" step="0.5" /><span id="val-audio-window" class="val"></span></label>
       <label class="row">Hop (s) <input type="range" id="set-audio-hop" min="0.2" max="2" step="0.1" /><span id="val-audio-hop" class="val"></span></label>
     </div>
-    <div class="ctl-note">Narocne modely (open-vocab, audio udalosti, vek) doporuceno na GPU.</div>
+    <div class="ctl-group">
+      <h3>Prepis (CZ)</h3>
+      <label class="row"><input type="checkbox" id="set-tr-enabled" /> Zapnuto (exp.)</label>
+      <label class="row"><input type="checkbox" id="set-tr-diar" /> Diarizace mluvcich</label>
+      <label class="row"><input type="checkbox" id="set-tr-record" /> Nahravat audio</label>
+    </div>
+    <div class="ctl-note">Narocne modely (open-vocab, audio udalosti, vek, SPZ, prepis) doporuceno na GPU.</div>
   </section>
 
-  <main id="grid">
+  <!-- ===== LIVE ===== -->
+  <main id="view-live" class="view">
     <section class="camera-row" id="cameras">
-      <section class="panel">
-        <div class="panel-head"><span class="dot" data-cam="cam2"></span> cam2</div>
-        <img class="stream" data-cam="cam2" alt="cam2" />
-      </section>
-      <section class="panel">
-        <div class="panel-head"><span class="dot" data-cam="cam3"></span> cam3</div>
-        <img class="stream" data-cam="cam3" alt="cam3" />
-      </section>
-      <section class="panel">
-        <div class="panel-head"><span class="dot" data-cam="cam4"></span> cam4</div>
-        <img class="stream" data-cam="cam4" alt="cam4" />
-      </section>
+      <section class="panel"><div class="panel-head"><span class="dot" data-cam="cam2"></span> cam2</div><img class="stream" data-cam="cam2" alt="cam2" /></section>
+      <section class="panel"><div class="panel-head"><span class="dot" data-cam="cam3"></span> cam3</div><img class="stream" data-cam="cam3" alt="cam3" /></section>
+      <section class="panel"><div class="panel-head"><span class="dot" data-cam="cam4"></span> cam4</div><img class="stream" data-cam="cam4" alt="cam4" /></section>
     </section>
-
     <section class="panel" id="panel-3d">
-      <div class="panel-head">3D detekovane objekty
-        <span class="hint">tahni = orbit · kolecko = zoom</span>
-      </div>
+      <div class="panel-head">3D detekovane objekty <span class="hint">tahni = orbit · kolecko = zoom</span></div>
       <div id="scene"></div>
     </section>
-
     <section class="panel" id="panel-topdown">
       <div class="panel-head">Pohled zeshora</div>
       <canvas id="topdown"></canvas>
     </section>
-
     <section class="panel" id="panel-audio">
-      <div class="panel-head">Zvuk
-        <span id="audio-cams" class="tabs"></span>
-      </div>
+      <div class="panel-head">Zvuk <span id="audio-cams" class="tabs"></span></div>
       <div id="audio-body">
         <img id="spectrogram" alt="spektrogram" />
         <canvas id="freq" width="320" height="120"></canvas>
         <ul id="audio-events"></ul>
+        <div id="transcript"></div>
       </div>
     </section>
   </main>
+
+  <!-- ===== HISTORY ===== -->
+  <section id="view-history" class="view hidden">
+    <div class="hist-toolbar">
+      <button id="hist-refresh" class="toolbtn">Obnovit</button>
+      <span id="hist-stats" class="muted"></span>
+    </div>
+    <div class="hist-cols">
+      <div class="hist-card">
+        <h3>Objekty</h3>
+        <table id="hist-objects"><thead><tr><th>ID</th><th>Trida</th><th>Atributy</th><th>Pozor.</th><th>Naposledy</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="hist-card">
+        <h3>Udalosti</h3>
+        <table id="hist-events"><thead><tr><th>Cas</th><th>Typ</th><th>Kamera</th><th>Popis</th></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== BENCHMARK ===== -->
+  <section id="view-benchmark" class="view hidden">
+    <div class="bench-card">
+      <h3>Vykon a zarizeni</h3>
+      <button id="bench-run" class="toolbtn">Spustit benchmark</button>
+      <div id="bench-result" class="bench-result muted">Zatim nespusteno.</div>
+      <h3>Vychozi detekcni konfigurace (pri startu)</h3>
+      <p class="muted">Uprav v zalozce Nastaveni, pak uloz jako vychozi pro pristi spusteni.</p>
+      <button id="bench-save" class="toolbtn">Ulozit aktualni nastaveni jako vychozi</button>
+      <span id="bench-saved" class="muted"></span>
+    </div>
+  </section>
+
+  <!-- ===== DEBUG ===== -->
+  <section id="view-debug" class="view hidden">
+    <div class="debug-toolbar">
+      <label>Verbosita
+        <select id="debug-level">
+          <option>DEBUG</option><option selected>INFO</option>
+          <option>WARNING</option><option>ERROR</option>
+        </select>
+      </label>
+      <button id="debug-clear" class="toolbtn">Vymazat</button>
+      <label><input type="checkbox" id="debug-autoscroll" checked /> Auto-scroll</label>
+    </div>
+    <pre id="debug-log"></pre>
+  </section>
 
   <script type="module" src="/main.js"></script>
 </body>

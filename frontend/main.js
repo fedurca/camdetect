@@ -33,6 +33,8 @@ function objectLabel(o) {
   if (o.behavior) s += ` · ${BEHAVIOR_CS[o.behavior] || o.behavior}`;
   if (o.age) s += ` · ${o.age}`;
   if (o.engine_type) s += ` · ${o.engine_type}`;
+  if (o.plate) s += ` · ${o.plate}`;
+  if (o.make) s += ` · ${o.make} ${o.model || ""}`.trimEnd();
   return s;
 }
 
@@ -317,6 +319,137 @@ function drawAudioEvents() {
   }
 }
 
+let latestTranscripts = {};
+function drawTranscript() {
+  const el = document.getElementById("transcript");
+  const segs = latestTranscripts[selectedAudioCam] || [];
+  if (!segs.length) { el.innerHTML = '<div class="muted">(zadny prepis)</div>'; return; }
+  el.innerHTML = segs.map((s) =>
+    `<div class="seg"><span class="spk">${s.speaker || "S1"}</span>${s.text}</div>`).join("");
+}
+
+// ---------------------------------------------------------------------------
+// Tabs
+// ---------------------------------------------------------------------------
+let activeTab = "live";
+let debugTimer = null;
+
+function switchTab(tab) {
+  activeTab = tab;
+  document.querySelectorAll(".tab-btn").forEach((b) =>
+    b.classList.toggle("active", b.dataset.tab === tab));
+  for (const v of ["live", "history", "benchmark", "debug"]) {
+    document.getElementById(`view-${v}`).classList.toggle("hidden", v !== tab);
+  }
+  if (tab === "live") setTimeout(resize, 50);
+  if (tab === "history") loadHistory();
+  if (debugTimer) { clearInterval(debugTimer); debugTimer = null; }
+  if (tab === "debug") { pollLogs(); debugTimer = setInterval(pollLogs, 1000); }
+}
+
+function wireTabs() {
+  document.querySelectorAll(".tab-btn").forEach((b) =>
+    b.addEventListener("click", () => switchTab(b.dataset.tab)));
+}
+
+// ---------------------------------------------------------------------------
+// History
+// ---------------------------------------------------------------------------
+async function loadHistory() {
+  try {
+    const [objs, evts, stats] = await Promise.all([
+      fetch("/api/history/objects?limit=200").then((r) => r.json()),
+      fetch("/api/history/events?limit=200").then((r) => r.json()),
+      fetch("/api/history/stats").then((r) => r.json()),
+    ]);
+    renderHistory(objs.objects || [], evts.events || [], stats);
+  } catch (e) { /* ignore */ }
+}
+
+function attrPills(attrs) {
+  const keep = ["behavior", "age", "engine_type", "plate", "make", "model",
+    "vehicle_age", "drivetrain"];
+  return keep.filter((k) => attrs[k]).map((k) =>
+    `<span class="pill">${attrs[k]}</span>`).join("");
+}
+
+function fmtTime(ts) {
+  return new Date(ts * 1000).toLocaleString("cs-CZ");
+}
+
+function renderHistory(objects, events, stats) {
+  document.getElementById("hist-stats").textContent =
+    `${stats.objects || 0} objektu, ${stats.events || 0} udalosti`;
+  const ob = document.querySelector("#hist-objects tbody");
+  ob.innerHTML = objects.map((o) =>
+    `<tr><td>${o.id}</td><td>${labelFor(o.class)}</td><td>${attrPills(o.attrs || {})}</td>` +
+    `<td>${o.observations}</td><td>${fmtTime(o.last_seen)}</td></tr>`).join("");
+  const eb = document.querySelector("#hist-events tbody");
+  eb.innerHTML = events.map((e) =>
+    `<tr><td>${fmtTime(e.ts)}</td><td>${e.kind}</td><td>${e.cam || ""}</td>` +
+    `<td>${e.label || ""} ${e.data ? JSON.stringify(e.data) : ""}</td></tr>`).join("");
+}
+
+// ---------------------------------------------------------------------------
+// Benchmark
+// ---------------------------------------------------------------------------
+async function runBenchmark() {
+  const el = document.getElementById("bench-result");
+  el.textContent = "Mereni…";
+  try {
+    const r = await fetch("/api/benchmark").then((x) => x.json());
+    const dev = r.cuda ? `GPU (${(r.gpus || []).join(", ")})` : "CPU";
+    el.textContent =
+      `Zarizeni: ${dev}\nDevice: ${r.device}\nModel: ${r.model || "?"} @ imgsz ${r.imgsz || "?"}\n` +
+      `Latence: ${r.latency_ms ?? "?"} ms/snimek\nFPS (1 stream): ${r.fps_single ?? "?"}\n` +
+      `Doporucene FPS/kamera: ${r.suggested_fps ?? "?"}` + (r.error ? `\nChyba: ${r.error}` : "");
+  } catch (e) { el.textContent = "Chyba benchmarku."; }
+}
+
+async function saveStartup() {
+  await pushSettings();
+  try {
+    await fetch("/api/settings/save-startup", { method: "POST" });
+    document.getElementById("bench-saved").textContent = "Ulozeno (pouzije se pri pristim startu).";
+  } catch (e) { document.getElementById("bench-saved").textContent = "Ulozeni selhalo."; }
+}
+
+// ---------------------------------------------------------------------------
+// Debug log
+// ---------------------------------------------------------------------------
+let lastLogSeq = 0;
+async function pollLogs() {
+  try {
+    const r = await fetch(`/api/logs?after=${lastLogSeq}&limit=500`).then((x) => x.json());
+    const pre = document.getElementById("debug-log");
+    for (const l of r.logs || []) {
+      lastLogSeq = l.seq;
+      const div = document.createElement("div");
+      div.className = `lvl-${l.level}`;
+      div.textContent = l.msg;
+      pre.appendChild(div);
+    }
+    while (pre.childNodes.length > 1000) pre.removeChild(pre.firstChild);
+    if (document.getElementById("debug-autoscroll").checked)
+      pre.scrollTop = pre.scrollHeight;
+  } catch (e) { /* ignore */ }
+}
+
+function wireExtraControls() {
+  document.getElementById("hist-refresh").addEventListener("click", loadHistory);
+  document.getElementById("bench-run").addEventListener("click", runBenchmark);
+  document.getElementById("bench-save").addEventListener("click", saveStartup);
+  document.getElementById("debug-level").addEventListener("change", async (e) => {
+    await fetch("/api/log-level", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ level: e.target.value }),
+    });
+  });
+  document.getElementById("debug-clear").addEventListener("click", () => {
+    document.getElementById("debug-log").innerHTML = "";
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Legend + status
 // ---------------------------------------------------------------------------
@@ -349,8 +482,10 @@ const els = {
   videoEnabled: "set-video-enabled", videoFps: "set-video-fps", videoImgsz: "set-video-imgsz",
   videoConf: "set-video-conf", ovEnabled: "set-ov-enabled", ovPrompts: "set-ov-prompts",
   attrBehavior: "set-attr-behavior", attrAge: "set-attr-age",
+  vehEnabled: "set-veh-enabled", vehPlates: "set-veh-plates", vehMakeModel: "set-veh-makemodel",
   audioEnabled: "set-audio-enabled", audioEvents: "set-audio-events",
   audioEngine: "set-audio-engine", audioWindow: "set-audio-window", audioHop: "set-audio-hop",
+  trEnabled: "set-tr-enabled", trDiar: "set-tr-diar", trRecord: "set-tr-record",
 };
 const $ = (id) => document.getElementById(id);
 
@@ -363,11 +498,17 @@ function applySettingsToControls(s) {
   $(els.ovPrompts).value = (s.video.open_vocabulary.prompts || []).join(", ");
   $(els.attrBehavior).checked = s.attributes.behavior;
   $(els.attrAge).checked = s.attributes.age;
+  $(els.vehEnabled).checked = s.vehicles.enabled;
+  $(els.vehPlates).checked = s.vehicles.plates;
+  $(els.vehMakeModel).checked = s.vehicles.make_model;
   $(els.audioEnabled).checked = s.audio.enabled;
   $(els.audioEvents).checked = s.audio.events;
   $(els.audioEngine).checked = s.audio.engine_2t4t;
   $(els.audioWindow).value = s.audio.window_s; $("val-audio-window").textContent = s.audio.window_s;
   $(els.audioHop).value = s.audio.hop_s; $("val-audio-hop").textContent = s.audio.hop_s;
+  $(els.trEnabled).checked = s.transcription.enabled;
+  $(els.trDiar).checked = s.transcription.diarization;
+  $(els.trRecord).checked = s.transcription.record;
 }
 
 function collectSettings() {
@@ -383,12 +524,22 @@ function collectSettings() {
       },
     },
     attributes: { behavior: $(els.attrBehavior).checked, age: $(els.attrAge).checked },
+    vehicles: {
+      enabled: $(els.vehEnabled).checked,
+      plates: $(els.vehPlates).checked,
+      make_model: $(els.vehMakeModel).checked,
+    },
     audio: {
       enabled: $(els.audioEnabled).checked,
       events: $(els.audioEvents).checked,
       engine_2t4t: $(els.audioEngine).checked,
       window_s: parseFloat($(els.audioWindow).value),
       hop_s: parseFloat($(els.audioHop).value),
+    },
+    transcription: {
+      enabled: $(els.trEnabled).checked,
+      diarization: $(els.trDiar).checked,
+      record: $(els.trRecord).checked,
     },
   };
 }
@@ -461,6 +612,8 @@ async function boot() {
   }
   applySettingsToControls(settings);
   wireSettings();
+  wireTabs();
+  wireExtraControls();
   await pushSettings();
 
   // camera visibility preference (default hidden)
@@ -497,6 +650,7 @@ function connectWs() {
     for (const o of latestObjects) prevPos.set(o.id, { x: o.x, y: o.y });
     latestObjects = state.objects || [];
     latestAudio = state.audio || {};
+    latestTranscripts = state.transcripts || {};
     updateObjects(latestObjects);
     setCameraStatus(state.cameras);
     document.getElementById("objcount").textContent = `${latestObjects.length} objektu`;
@@ -505,11 +659,14 @@ function connectWs() {
 
 function animate() {
   requestAnimationFrame(animate);
-  controls.update();
-  drawTopdown();
-  drawFreq();
-  drawAudioEvents();
-  renderer.render(scene, camera);
+  if (activeTab === "live") {
+    controls.update();
+    drawTopdown();
+    drawFreq();
+    drawAudioEvents();
+    drawTranscript();
+    renderer.render(scene, camera);
+  }
 }
 
 boot();

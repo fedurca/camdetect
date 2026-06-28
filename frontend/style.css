@@ -19,6 +19,7 @@ html, body {
   color: var(--text);
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
 }
+body { display: flex; flex-direction: column; }
 
 #topbar {
   display: flex;
@@ -27,7 +28,18 @@ html, body {
   padding: 8px 14px;
   background: var(--panel-head);
   border-bottom: 1px solid #0a0e16;
+  flex-wrap: wrap;
 }
+
+#tabs { display: flex; gap: 6px; }
+.tab-btn {
+  font-size: 12px; padding: 4px 12px; border-radius: 6px; cursor: pointer;
+  background: #0a0e16; color: var(--muted); border: 1px solid #233047;
+}
+.tab-btn.active { color: var(--accent); border-color: var(--accent); }
+
+.view { flex: 1; min-height: 0; overflow: auto; }
+.view.hidden { display: none; }
 #topbar .title { font-weight: 700; letter-spacing: 0.5px; color: var(--accent); }
 .spacer { flex: 1; }
 
@@ -71,19 +83,18 @@ html, body {
 }
 .ctl-note { grid-column: 1 / -1; font-size: 11px; color: var(--muted); font-style: italic; }
 
-/* ----- main grid ----- */
-#grid {
+/* ----- main grid (live view) ----- */
+#view-live {
   display: grid;
   gap: 8px;
   padding: 8px;
-  height: calc(100vh - 47px);
   grid-template-columns: 2fr 1fr;
   grid-template-rows: 1.5fr 1fr;
   grid-template-areas:
     "view3d topdown"
     "audio  audio";
 }
-body:not(.cameras-hidden) #grid {
+body:not(.cameras-hidden) #view-live {
   grid-template-rows: auto 1.5fr 1fr;
   grid-template-areas:
     "cameras cameras"
@@ -124,9 +135,34 @@ body.cameras-hidden #cameras { display: none; }
 }
 .tabs .tab.active { color: var(--accent); border-color: var(--accent); }
 
-#audio-body { flex: 1; display: grid; grid-template-columns: auto 1fr auto; gap: 10px; padding: 8px; min-height: 0; align-items: start; }
+#audio-body { flex: 1; display: grid; grid-template-columns: auto 1fr auto 1.2fr; gap: 10px; padding: 8px; min-height: 0; align-items: start; }
 #spectrogram { height: 100%; max-height: 160px; border-radius: 6px; border: 1px solid var(--border); background: #000; }
 #freq { width: 100%; height: 100%; max-height: 160px; background: #0a0e16; border: 1px solid var(--border); border-radius: 6px; }
-#audio-events { list-style: none; margin: 0; padding: 0; min-width: 160px; font-size: 12px; overflow: auto; }
+#audio-events { list-style: none; margin: 0; padding: 0; min-width: 140px; font-size: 12px; overflow: auto; }
 #audio-events li { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
 #audio-events .swatch { width: 10px; height: 10px; border-radius: 3px; }
+#transcript { font-size: 12px; overflow: auto; max-height: 160px; color: var(--text); }
+#transcript .seg { padding: 2px 0; }
+#transcript .spk { color: var(--accent); font-weight: 600; margin-right: 4px; }
+
+/* ----- history / benchmark / debug ----- */
+.hist-toolbar, .debug-toolbar { display: flex; align-items: center; gap: 12px; padding: 10px 14px; }
+.muted { color: var(--muted); font-size: 12px; }
+.hist-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 14px 14px; }
+.hist-card, .bench-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+.hist-card h3, .bench-card h3 { margin: 0 0 8px; font-size: 13px; color: var(--accent); }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; }
+td .pill { background: #0a0e16; border: 1px solid #233047; border-radius: 5px; padding: 1px 5px; margin: 0 3px 3px 0; display: inline-block; font-size: 11px; }
+
+.bench-card { margin: 14px; max-width: 720px; }
+.bench-result { white-space: pre-wrap; background: #0a0e16; border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin: 8px 0; font-family: ui-monospace, monospace; }
+
+#debug-log {
+  margin: 0 14px 14px; padding: 10px; background: #05080e; border: 1px solid var(--border);
+  border-radius: 8px; font-family: ui-monospace, monospace; font-size: 11px; line-height: 1.45;
+  height: calc(100% - 70px); overflow: auto; white-space: pre-wrap;
+}
+.lvl-ERROR { color: #f87171; } .lvl-WARNING { color: #fbbf24; }
+.lvl-INFO { color: #cbd5e1; } .lvl-DEBUG { color: #64748b; }
