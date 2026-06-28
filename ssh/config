@@ -1,0 +1,13 @@
+# SSH client config for this workspace.
+# Uses the host machine's SSH agent (forwarded into the cloud environment).
+
+Host *
+  AddKeysToAgent yes
+  IdentitiesOnly yes
+  StrictHostKeyChecking accept-new
+  IdentityFile ~/.ssh/id_ed25519_workspace
+
+# Example: camera / RTSP host on your local network
+# Host camdetect
+#   HostName 192.168.1.100
+#   User pi
