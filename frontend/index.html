@@ -89,10 +89,10 @@
       <canvas id="topdown"></canvas>
     </section>
     <section class="panel" id="panel-audio">
-      <div class="panel-head">Zvuk <span id="audio-cams" class="tabs"></span></div>
+      <div class="panel-head">Zvuk (spektrogram: <span id="audio-cams" class="tabs"></span>)</div>
       <div id="audio-body">
         <img id="spectrogram" alt="spektrogram" />
-        <canvas id="freq" width="320" height="120"></canvas>
+        <canvas id="freq" width="320" height="140"></canvas>
         <ul id="audio-events"></ul>
         <div id="transcript"></div>
       </div>
@@ -114,6 +114,17 @@
         <h3>Udalosti</h3>
         <table id="hist-events"><thead><tr><th>Cas</th><th>Typ</th><th>Kamera</th><th>Popis</th></tr></thead><tbody></tbody></table>
       </div>
+    </div>
+    <div class="hist-card" id="rec-card">
+      <h3>Video vzorky (MKV, nativni kodovani + udalosti v titulcich)</h3>
+      <div class="rec-controls">
+        <select id="rec-cam"></select>
+        <select id="rec-dur"><option>10</option><option selected>15</option><option>30</option></select>
+        <span class="muted">s</span>
+        <button id="rec-start" class="toolbtn">Nahrat vzorek</button>
+        <span id="rec-status" class="muted"></span>
+      </div>
+      <table id="rec-list"><thead><tr><th>Soubor</th><th>Velikost</th><th>Stav</th><th></th></tr></thead><tbody></tbody></table>
     </div>
   </section>
 
@@ -142,7 +153,16 @@
       <button id="debug-clear" class="toolbtn">Vymazat</button>
       <label><input type="checkbox" id="debug-autoscroll" checked /> Auto-scroll</label>
     </div>
-    <pre id="debug-log"></pre>
+    <div class="debug-cols">
+      <div class="debug-pane">
+        <h3>Systemovy log</h3>
+        <pre id="debug-log"></pre>
+      </div>
+      <div class="debug-pane">
+        <h3>Detekcni udalosti</h3>
+        <pre id="events-log"></pre>
+      </div>
+    </div>
   </section>
 
   <script type="module" src="/main.js"></script>

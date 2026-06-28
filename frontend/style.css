@@ -155,14 +155,50 @@ table { width: 100%; border-collapse: collapse; font-size: 12px; }
 th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
 th { color: var(--muted); font-weight: 600; }
 td .pill { background: #0a0e16; border: 1px solid #233047; border-radius: 5px; padding: 1px 5px; margin: 0 3px 3px 0; display: inline-block; font-size: 11px; }
+td a { color: var(--accent); }
 
 .bench-card { margin: 14px; max-width: 720px; }
 .bench-result { white-space: pre-wrap; background: #0a0e16; border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin: 8px 0; font-family: ui-monospace, monospace; }
 
-#debug-log {
-  margin: 0 14px 14px; padding: 10px; background: #05080e; border: 1px solid var(--border);
+.debug-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 14px 14px; height: calc(100% - 56px); }
+.debug-pane { display: flex; flex-direction: column; min-height: 0; }
+.debug-pane h3 { margin: 0 0 6px; font-size: 13px; color: var(--accent); }
+#debug-log, #events-log {
+  margin: 0; padding: 10px; background: #05080e; border: 1px solid var(--border);
   border-radius: 8px; font-family: ui-monospace, monospace; font-size: 11px; line-height: 1.45;
-  height: calc(100% - 70px); overflow: auto; white-space: pre-wrap;
+  flex: 1; overflow: auto; white-space: pre-wrap;
 }
 .lvl-ERROR { color: #f87171; } .lvl-WARNING { color: #fbbf24; }
 .lvl-INFO { color: #cbd5e1; } .lvl-DEBUG { color: #64748b; }
+
+/* recordings */
+#rec-card { margin: 0 14px 14px; }
+.rec-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.rec-controls select { background: #0a0e16; color: var(--text); border: 1px solid #233047; border-radius: 5px; padding: 3px 6px; }
+
+/* ----- mobile / responsive ----- */
+@media (max-width: 900px) {
+  #topbar { gap: 6px; padding: 6px 8px; }
+  .legend { display: none; }
+  #tabs { order: 5; width: 100%; overflow-x: auto; }
+  #view-live {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+    grid-template-areas: "view3d" "topdown" "audio";
+    height: auto; min-height: calc(100vh - 60px);
+  }
+  body:not(.cameras-hidden) #view-live {
+    grid-template-rows: auto auto auto auto;
+    grid-template-areas: "cameras" "view3d" "topdown" "audio";
+  }
+  #cameras { flex-direction: column; height: auto; }
+  #cameras .panel { height: 200px; }
+  #panel-3d { height: 60vh; }
+  #panel-topdown { height: 50vh; }
+  #panel-audio { min-height: 320px; }
+  #audio-body { grid-template-columns: 1fr; }
+  #spectrogram, #freq { max-height: 140px; width: 100%; }
+  .hist-cols, .debug-cols { grid-template-columns: 1fr; }
+  .debug-cols { height: auto; }
+  #debug-log, #events-log { height: 40vh; }
+}

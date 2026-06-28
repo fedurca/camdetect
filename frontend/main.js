@@ -279,26 +279,40 @@ function selectAudioCam(cam) {
     t.classList.toggle("active", t.textContent === cam));
 }
 
+const CAM_COLORS = ["#3b82f6", "#22c55e", "#f59e0b", "#a78bfa", "#f472b6"];
+
+// Combined frequency analysis across all 3 cameras in a single plot:
+// grouped bars per band (low/mid/high), one colored bar per camera.
 function drawFreq() {
   freqX.clearRect(0, 0, freqC.width, freqC.height);
-  const a = latestAudio[selectedAudioCam];
-  if (!a) return;
-  const bands = [["low", a.bands.low], ["mid", a.bands.mid], ["high", a.bands.high]];
-  const bw = freqC.width / 3;
-  bands.forEach(([name, v], i) => {
-    const h = Math.min(1, v) * (freqC.height - 24);
-    freqX.fillStyle = ["#3b82f6", "#22c55e", "#f59e0b"][i];
-    freqX.fillRect(i * bw + 10, freqC.height - 18 - h, bw - 20, h);
+  const cams = (appConfig?.cameras || []).map((c) => c.id);
+  if (!cams.length) return;
+  const bands = ["low", "mid", "high"];
+  const groupW = freqC.width / 3;
+  const barW = Math.max(5, (groupW - 24) / cams.length);
+  bands.forEach((band, bi) => {
+    cams.forEach((cam, ci) => {
+      const a = latestAudio[cam];
+      const v = a ? Math.min(1, a.bands[band]) : 0;
+      const h = v * (freqC.height - 34);
+      const x = bi * groupW + 12 + ci * barW;
+      freqX.fillStyle = CAM_COLORS[ci % CAM_COLORS.length];
+      freqX.fillRect(x, freqC.height - 20 - h, barW - 2, h);
+    });
     freqX.fillStyle = "#94a3b8"; freqX.font = "10px sans-serif";
-    freqX.fillText(name, i * bw + bw / 2 - 8, freqC.height - 4);
+    freqX.fillText(band, bi * groupW + groupW / 2 - 8, freqC.height - 5);
   });
+  // header: combined level + per-camera legend
+  const levels = cams.map((c) => (latestAudio[c] ? latestAudio[c].level : 0));
+  const avg = levels.reduce((s, x) => s + x, 0) / cams.length;
   freqX.fillStyle = "#e2e8f0"; freqX.font = "11px sans-serif";
-  freqX.fillText(`dom ${a.dominant_freq.toFixed(0)} Hz`, 8, 14);
-  freqX.fillText(`level ${(a.level * 100).toFixed(0)}%`, freqC.width - 80, 14);
-  if (a.engine_type) {
-    freqX.fillStyle = "#38bdf8";
-    freqX.fillText(`motor ${a.engine_type}`, freqC.width - 80, 28);
-  }
+  freqX.fillText(`vsechny kamery · level avg ${(avg * 100).toFixed(0)}%`, 8, 13);
+  cams.forEach((cam, ci) => {
+    freqX.fillStyle = CAM_COLORS[ci % CAM_COLORS.length];
+    freqX.fillText(cam, freqC.width - 36 * cams.length + ci * 36, 13);
+  });
+  const eng = cams.map((c) => latestAudio[c] && latestAudio[c].engine_type).find(Boolean);
+  if (eng) { freqX.fillStyle = "#38bdf8"; freqX.fillText(`motor ${eng}`, 8, 27); }
 }
 
 function drawAudioEvents() {
@@ -345,9 +359,12 @@ function switchTab(tab) {
     document.getElementById(`view-${v}`).classList.toggle("hidden", v !== tab);
   }
   if (tab === "live") setTimeout(resize, 50);
-  if (tab === "history") loadHistory();
+  if (tab === "history") { loadHistory(); loadRecordings(); }
   if (debugTimer) { clearInterval(debugTimer); debugTimer = null; }
-  if (tab === "debug") { pollLogs(); debugTimer = setInterval(pollLogs, 1000); }
+  if (tab === "debug") {
+    pollLogs(); pollEvents();
+    debugTimer = setInterval(() => { pollLogs(); pollEvents(); }, 1000);
+  }
 }
 
 function wireTabs() {
@@ -438,10 +455,68 @@ async function pollLogs() {
   } catch (e) { /* ignore */ }
 }
 
+// ---------------------------------------------------------------------------
+// Detection events log (second debug window)
+// ---------------------------------------------------------------------------
+async function pollEvents() {
+  try {
+    const r = await fetch("/api/history/events?limit=100").then((x) => x.json());
+    const pre = document.getElementById("events-log");
+    const evs = (r.events || []).slice().reverse();
+    pre.innerHTML = "";
+    for (const e of evs) {
+      const div = document.createElement("div");
+      const t = new Date(e.ts * 1000).toLocaleTimeString("cs-CZ");
+      const extra = e.data ? " " + JSON.stringify(e.data) : "";
+      div.textContent = `${t} [${e.kind}] ${e.cam || ""} ${e.label || ""}${extra}`;
+      pre.appendChild(div);
+    }
+    if (document.getElementById("debug-autoscroll").checked)
+      pre.scrollTop = pre.scrollHeight;
+  } catch (e) { /* ignore */ }
+}
+
+// ---------------------------------------------------------------------------
+// Recordings
+// ---------------------------------------------------------------------------
+function buildRecCams() {
+  const sel = document.getElementById("rec-cam");
+  sel.innerHTML = (appConfig.cameras || []).map((c) => `<option>${c.id}</option>`).join("");
+}
+
+async function startRecording() {
+  const cam = document.getElementById("rec-cam").value;
+  const dur = parseFloat(document.getElementById("rec-dur").value);
+  const st = document.getElementById("rec-status");
+  st.textContent = "Spoustim…";
+  try {
+    const r = await fetch("/api/record/start", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cam, duration: dur }),
+    }).then((x) => x.json());
+    st.textContent = r.error ? `Chyba: ${r.error}` : `Nahravam ${cam} (${dur}s)…`;
+    loadRecordings();
+    setTimeout(loadRecordings, (dur + 3) * 1000);
+  } catch (e) { st.textContent = "Chyba nahravani."; }
+}
+
+async function loadRecordings() {
+  try {
+    const r = await fetch("/api/recordings").then((x) => x.json());
+    const tb = document.querySelector("#rec-list tbody");
+    tb.innerHTML = (r.recordings || []).map((x) =>
+      `<tr><td>${x.file}</td><td>${(x.size / 1e6).toFixed(1)} MB</td>` +
+      `<td>${x.recording ? "nahrava se" : "hotovo"}</td>` +
+      `<td>${x.recording ? "" : `<a href="/recordings/${x.file}" download>stahnout</a>`}</td></tr>`
+    ).join("");
+  } catch (e) { /* ignore */ }
+}
+
 function wireExtraControls() {
   document.getElementById("hist-refresh").addEventListener("click", loadHistory);
   document.getElementById("bench-run").addEventListener("click", runBenchmark);
   document.getElementById("bench-save").addEventListener("click", saveStartup);
+  document.getElementById("rec-start").addEventListener("click", startRecording);
   document.getElementById("debug-level").addEventListener("change", async (e) => {
     await fetch("/api/log-level", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -605,6 +680,7 @@ async function boot() {
   computeBounds(appConfig.cameras);
   buildLegend(appConfig.colors);
   buildAudioTabs(appConfig.cameras);
+  buildRecCams();
   document.getElementById("mode").textContent = appConfig.mode + " mode";
 
   // settings: server values, overlaid by any saved local preferences
