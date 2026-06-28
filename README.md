@@ -121,6 +121,33 @@ On car/truck/bus detections (`backend/vehicles.py`, experimental, OFF by default
 In demo mode stable synthetic values are attached per car so the UI/DB show the
 feature. Results are merged onto the fused track and persisted to the database.
 
+## Video sample recording (MKV + events in subtitles)
+
+`backend/recorder.py` records short MKV samples on demand from the **Historie**
+tab ("Nahrat vzorek"):
+
+- video uses **native encoding** - in live mode the camera's RTSP stream is
+  stream-copied (`-c copy`, no re-encode); in demo/fallback the annotated frames
+  are encoded with FFV1 (lossless, MKV-native),
+- the **detected events** captured during the clip are muxed into the same
+  container as an **SRT subtitle track** (one cue per second), so the data
+  travels inside the file.
+
+API: `POST /api/record/start {cam,duration}`, `POST /api/record/stop {cam}`,
+`GET /api/recordings`, `GET /recordings/{name}`. Files land in
+`data/recordings/` (gitignored). Inspect with
+`ffprobe file.mkv` (shows a `subrip` subtitle stream) or play in mpv/VLC with
+subtitles enabled.
+
+## Duplicate-detection handling
+
+The same physical object seen from several cameras (often with a flipped label,
+e.g. a silver car read as car/truck/bus) used to appear multiple times. Fusion
+now groups confusable vehicle classes together, uses a class-aware merge radius
+(larger for vehicles), clusters detections agglomeratively, and de-duplicates
+tracks that drift within the merge radius - collapsing them into one object with
+the highest-confidence label.
+
 ## Object/event history (SQLite)
 
 `backend/db.py` logs to a local SQLite DB (`data/camdetect.sqlite`):
@@ -147,10 +174,19 @@ tuned config). Delete that file to revert to the committed defaults.
 
 ## Debug log
 
-The **Debug** tab streams the application log (also written to
-`data/logs/camdetect.log`, rotating). Verbosity is set in `config.yaml`
-(`logging.level`), can be overridden at startup via `CAMDETECT_LOG_LEVEL`, and
-changed live from the tab (`POST /api/log-level`).
+The **Debug** tab has two panes: the **system log** (also written to
+`data/logs/camdetect.log`, rotating) and a **detection-events log** fed from the
+database. Verbosity is set in `config.yaml` (`logging.level`), can be overridden
+at startup via `CAMDETECT_LOG_LEVEL`, and changed live from the tab
+(`POST /api/log-level`).
+
+## UI notes
+
+- The audio panel shows a **single combined frequency plot** with all three
+  cameras' band energies overlaid (grouped bars, one color per camera); the
+  spectrogram tabs still pick a single camera.
+- The layout is **mobile friendly**: on narrow screens the panels stack
+  vertically, the tab bar scrolls, and the audio sub-panels reflow to one column.
 
 ## One config of record
 
