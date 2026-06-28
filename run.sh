@@ -36,7 +36,15 @@ case "$MODE" in
     ;;
   demo|live)
     export CAMDETECT_MODE="$MODE"
-    echo "Starting camdetect ($MODE) on http://$HOST:$PORT"
+    export PORT
+    echo "Starting camdetect ($MODE), web published on ALL interfaces (${HOST}:${PORT})"
+    echo "  local:   http://localhost:${PORT}"
+    # Print LAN addresses so you can reach it from other machines.
+    if command -v hostname >/dev/null 2>&1; then
+      for ip in $(hostname -I 2>/dev/null); do
+        echo "  network: http://${ip}:${PORT}"
+      done
+    fi
     exec uvicorn backend.app:app --host "$HOST" --port "$PORT"
     ;;
   *)

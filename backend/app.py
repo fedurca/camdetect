@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import os
+import socket
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -42,10 +43,38 @@ settings.load_startup(STARTUP_PATH)
 pipeline: Pipeline | None = None
 
 
+def _local_ips() -> list[str]:
+    """Best-effort enumeration of this host's IPv4 addresses."""
+    ips: set[str] = set()
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ips.add(info[4][0])
+    except Exception:
+        pass
+    try:  # the address used to reach the internet (the LAN IP)
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ips.add(s.getsockname()[0])
+        s.close()
+    except Exception:
+        pass
+    ips.discard("127.0.0.1")
+    return sorted(ips)
+
+
+def _log_access_urls() -> None:
+    port = os.environ.get("PORT", "8000")
+    logger.info("Web UI is published on ALL interfaces (0.0.0.0:%s).", port)
+    logger.info("  local:   http://localhost:%s", port)
+    for ip in _local_ips():
+        logger.info("  network: http://%s:%s", ip, port)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global pipeline
     logger.info("Starting pipeline in '%s' mode", MODE)
+    _log_access_urls()
     pipeline = Pipeline(cfg, mode=MODE, settings=settings)
     pipeline.start()
     try:

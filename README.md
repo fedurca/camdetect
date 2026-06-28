@@ -283,6 +283,65 @@ ssh -L 8000:localhost:8000 fedurca@tpd
 To keep it running after you disconnect, use tmux (`tmux new -s camdetect`,
 run `./run.sh live`, detach with Ctrl-b d) or install it as a service.
 
+The web UI is always published on **all network interfaces** (`0.0.0.0`), so it
+is reachable from other machines on the LAN. On startup the server prints the
+exact URLs (e.g. `http://192.168.x.y:8000`); you can also list the host IPs with
+`hostname -I`.
+
+## Testing on the NVIDIA multi-GPU PC
+
+1. Get the code and create the environment on the GPU machine:
+
+```bash
+git clone https://github.com/fedurca/camdetect && cd camdetect   # or: git pull
+python3 -m venv .venv && source .venv/bin/activate
+pip install --upgrade pip
+# CUDA-enabled PyTorch (pick the index matching your driver/CUDA):
+pip install torch --index-url https://download.pytorch.org/whl/cu124
+pip install -r requirements.txt
+pip install -r requirements-optional.txt   # optional: Czech STT + ANPR
+```
+
+2. Confirm the GPU is visible:
+
+```bash
+nvidia-smi
+python -c "import torch; print(torch.cuda.is_available(), torch.cuda.device_count())"
+```
+
+3. Turn the heavy features on for GPU in [`config.yaml`](config.yaml):
+
+- `detection.device: "auto"` (auto-selects CUDA) and a larger `model:`
+  (e.g. `yolo11m.pt` or `yolo11l.pt`), higher `fps`;
+- enable `detection.open_vocabulary.enabled`, `detection.attributes.age`,
+  `vehicles.enabled`, `audio.events.enabled`, `transcription.enabled` as desired;
+- multi-GPU: pin cameras to GPUs with each camera's `device: "cuda:0"` /
+  `"cuda:1"` (the pipeline builds one detector per distinct device).
+
+4. Run it (binds to all interfaces):
+
+```bash
+./run.sh live          # or: ./run.sh demo  to try without cameras
+# startup prints: http://<this-pc-ip>:8000
+```
+
+5. Open it from any other PC on the network at `http://<gpu-pc-ip>:8000`.
+   If it is not reachable, open the port in the firewall:
+
+```bash
+sudo ufw allow 8000/tcp        # Ubuntu firewall (if enabled)
+```
+
+6. Verify GPU usage in the app: open the **Benchmark** tab and click
+   "Spustit benchmark" - it should report `GPU (NVIDIA ...)`, a low latency and
+   high FPS. Tune the detection settings in **Nastaveni** and click
+   "Ulozit jako vychozi" so the program starts with that config next time
+   (saved to `data/startup.json`). Watch live load with `nvidia-smi -l 1`.
+
+Notes: the 3D view loads three.js from a CDN, so the browser you view from needs
+internet access. The camera RTSP streams must be reachable from the GPU PC's
+network.
+
 ## Configuration
 
 Everything lives in [`config.yaml`](config.yaml):
