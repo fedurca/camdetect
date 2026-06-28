@@ -66,6 +66,48 @@ To enable the real models locally: `pip install -r requirements-optional.txt`
 (faster-whisper, optionally pyannote.audio) and turn on transcription in the
 settings drawer. Recommended on the GPU box.
 
+### Linking a speaker to a detected person (acoustic localization)
+
+Each transcript segment is tied to the most likely **person** detected in video
+(`backend/pipeline.py::_locate_speaker`). Because all three cameras have a
+microphone and we know their world positions, we localize the speaker by
+**level-pattern matching**: for every person track we predict the per-camera
+speech loudness from inverse-square distance and pick the person whose predicted
+pattern best matches the speech-band energy actually measured at the three mics
+(cosine similarity), plus an energy-weighted source-position estimate. This needs
+no sample-level audio sync, so it is robust over the three independent RTSP audio
+streams. The linked person id is shown in the transcript (`osoba #N`), on the
+person's 3D label, and stored with each `transcript` event in the database.
+
+### How to test it on your machine
+
+Demo (no cameras/models needed) - verify the whole path quickly:
+
+```bash
+./run.sh demo            # http://localhost:8000
+# In the UI: open "Nastaveni", enable "Prepis (CZ)".
+# Audio panel shows Czech segments tagged "osoba #N"; the person's 3D label
+# shows the spoken text. Open the "Historie" tab -> transcript events are
+# labelled with the linked person and a localization score.
+```
+
+Live (real cameras, Czech speech):
+
+```bash
+pip install -r requirements-optional.txt     # faster-whisper (+ optional pyannote)
+./run.sh live
+# Enable "Prepis (CZ)" (and "Diarizace mluvcich" for speaker turns).
+# Speak near one camera while a person is in view of the cameras: the transcript
+# should attach to that person (osoba #N). Walking closer to a different camera
+# shifts the localization. Check the result in the Historie tab and in
+# data/camdetect.sqlite (events table, kind='transcript', data.loc + data.track_id).
+```
+
+Notes on accuracy: localization is level-based, so it works best when speakers
+are separated in space and the mics' gains are comparable. With a single person
+in view the segment is attributed to them directly. For sample-accurate TDOA
+triangulation you would need synchronized audio capture (future work).
+
 ## Vehicle analysis: plates, make/model, age, drivetrain
 
 On car/truck/bus detections (`backend/vehicles.py`, experimental, OFF by default):
