@@ -48,7 +48,43 @@ analytically from the identical G5 Bullet FOV (84.4° × 45.4°) and 2K resoluti
 ./run.sh live
 ```
 
-`run.sh` creates `.venv` and installs `requirements.txt` on first run.
+`run.sh` creates `.venv` and installs `requirements.txt` on first run. If the
+file isn't executable, run it with `bash run.sh demo`. There's also a `Makefile`
+with the same shortcuts: `make setup`, `make demo`, `make check`, `make run`.
+
+## Running on your machine (`~/camdetect`, Ubuntu, CPU)
+
+First time, get the latest `main`. If you have local untracked copies of the
+camera images (`2.png 3.png 4.png`), a plain `git pull` is blocked
+("untracked working tree files would be overwritten"). They're already tracked
+in the repo and identical, so just clear the local copies and pull:
+
+```bash
+cd ~/camdetect
+rm -f 2.png 3.png 4.png        # or: git stash -u
+git pull origin main
+```
+
+Then run it (CPU-only is fine; first run installs deps and downloads the small
+model, which can take a few minutes):
+
+```bash
+./run.sh demo        # or: make demo   — no cameras needed, http://localhost:8000
+./run.sh check       # confirm the 3 RTSP cameras are reachable on your LAN
+./run.sh live        # or: make run    — real cameras
+```
+
+Viewing the UI when you're SSH'd into the machine — either open the LAN address
+directly (`http://<machine-ip>:8000`) or forward the port over SSH from your
+laptop:
+
+```bash
+ssh -L 8000:localhost:8000 fedurca@tpd
+# then browse to http://localhost:8000 on your laptop
+```
+
+To keep it running after you disconnect, use tmux (`tmux new -s camdetect`,
+run `./run.sh live`, detach with Ctrl-b d) or install it as a service.
 
 ## Configuration
 
