@@ -1,0 +1,13 @@
+# Optional heavy extras for camdetect. Install on demand (GPU recommended):
+#   pip install -r requirements-optional.txt
+#
+# These power the experimental features that are OFF by default:
+
+# Czech audio transcription (Whisper / CTranslate2)
+faster-whisper==1.0.3
+
+# License-plate OCR (ANPR). CPU-capable but slow.
+easyocr==1.7.2
+
+# Speaker diarization (needs a HuggingFace token; large models).
+# pyannote.audio==3.3.2

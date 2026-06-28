@@ -1,9 +1,9 @@
 """Logging configuration: console + rotating file + in-memory ring buffer.
 
 The ring buffer backs the in-app Debug window. Verbosity comes from the config
-file but can be overridden at startup via the ``CAMDETECT_LOG_LEVEL`` env var or
-a ``--log-level`` CLI argument (see ``backend.app``). It is also adjustable at
-runtime through ``/api/log-level``.
+file (``logging.level``) but can be overridden at startup via the
+``CAMDETECT_LOG_LEVEL`` environment variable, and adjusted at runtime through
+``POST /api/log-level``.
 """
 from __future__ import annotations
 

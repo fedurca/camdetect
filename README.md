@@ -9,11 +9,15 @@ tracked objects, and shows everything in a browser:
 - three live video panels with detection overlays (class, track ID, probability) -
   hideable, hidden by default,
 - a 3D scene of the detected objects on the courtyard ground, color-coded by class,
-- a dedicated top-down (plan) view, and
-- an audio panel with a live spectrogram, frequency analysis, and sound events.
+- a dedicated top-down (plan) view,
+- an audio panel with a live spectrogram, frequency analysis, sound events, and
+  a live Czech transcript, and
+- tabs for object/event **History**, a **Benchmark** (GPU/CPU + tuning), and a
+  **Debug** log viewer.
 
 Both video and audio detection are independently toggleable and tunable (CPU
-load / frame rate) from the in-app settings drawer.
+load / frame rate) from the in-app settings drawer. Detected objects and events
+are logged to a local SQLite database and browsable in the History tab.
 
 ```
  cam2 ─┬─ video ─▶ YOLO (+ YOLO-World) ─▶ ground homography ─▶ fusion/tracking ─┐
@@ -40,6 +44,78 @@ energy, level), and derives sound events with a light heuristic classifier
 (engine, drone, bark, speech, loud). An experimental 2-stroke vs 4-stroke engine
 classifier inspects the low-frequency harmonic structure and tags nearby
 motorcycle/car tracks. A heavy event model can be enabled later (GPU).
+
+## Audio recording, transcription and diarization (Czech)
+
+Approach (see `backend/transcribe.py`):
+
+- **Transcription** uses `faster-whisper` (CTranslate2 Whisper) with
+  `language="cs"`. Pick a model size (`tiny`/`base`/`small`/`medium`) to trade
+  accuracy for speed; it runs on CPU but is much faster on GPU. Loaded lazily and
+  OFF by default.
+- **Diarization** (who spoke when): the accurate route is `pyannote.audio` (needs
+  a HuggingFace token, heavy). When it is not installed we fall back to a light
+  spectral-centroid heuristic that still tags S1/S2 turns so the UI shows speaker
+  separation.
+- **Recording**: optional rolling per-camera WAV files (`data/audio/<cam>.wav`).
+
+Transcripts appear live in the audio panel and are logged to the database. In
+demo mode synthetic Czech segments are emitted so the path works without models.
+
+To enable the real models locally: `pip install -r requirements-optional.txt`
+(faster-whisper, optionally pyannote.audio) and turn on transcription in the
+settings drawer. Recommended on the GPU box.
+
+## Vehicle analysis: plates, make/model, age, drivetrain
+
+On car/truck/bus detections (`backend/vehicles.py`, experimental, OFF by default):
+
+- **License plate (ANPR)**: optional `easyocr` backend reads the plate region
+  (lower part of the vehicle box); Czech plates match `\d[A-Z]\d \d{4}`.
+- **Make / model / age / drivetrain**: a real solution uses a fine-grained
+  vehicle classifier plus a plate->registry lookup; no such model ships here, so
+  live values are `unknown` until one is plugged in.
+
+In demo mode stable synthetic values are attached per car so the UI/DB show the
+feature. Results are merged onto the fused track and persisted to the database.
+
+## Object/event history (SQLite)
+
+`backend/db.py` logs to a local SQLite DB (`data/camdetect.sqlite`):
+
+- `objects` - one row per physical object, merged across time/cameras by
+  similarity (same class within `database.merge_distance_m` and
+  `database.merge_time_s`), accumulating first/last seen, max confidence,
+  observation count and a JSON `attrs` blob (behavior, age, plate, make/model,
+  engine type, ...).
+- `events` - append-only log (object appeared, audio events, transcripts, ...).
+
+Browse it in the **History** tab; query it via `/api/history/objects`,
+`/api/history/events`, `/api/history/stats`. Rows older than
+`database.retention_days` are purged.
+
+## Benchmark and startup config
+
+The **Benchmark** tab reports whether you are on **GPU or CPU** (and the GPU
+name), measures inference latency/FPS for the current model, and suggests a
+per-camera FPS. Tune the detection settings in the drawer, then
+**"Ulozit jako vychozi"** persists them to `data/startup.json`, which is loaded
+on top of `config.yaml` at the next launch (so the program starts with your
+tuned config). Delete that file to revert to the committed defaults.
+
+## Debug log
+
+The **Debug** tab streams the application log (also written to
+`data/logs/camdetect.log`, rotating). Verbosity is set in `config.yaml`
+(`logging.level`), can be overridden at startup via `CAMDETECT_LOG_LEVEL`, and
+changed live from the tab (`POST /api/log-level`).
+
+## One config of record
+
+All persistent parameters - camera RTSP URLs, their mutual world positions,
+detection/audio/db/logging defaults - live in a single committed
+[`config.yaml`](config.yaml). Only machine-specific runtime tweaks land in the
+gitignored `data/startup.json` overlay.
 
 ## How localization works
 
@@ -188,12 +264,16 @@ config.yaml              # all settings
 run.sh                   # launcher (live | demo | check)
 backend/
   app.py                 # FastAPI: UI, MJPEG streams, /api/*, WebSocket
-  pipeline.py            # capture -> detect -> localize -> fuse orchestration
+  pipeline.py            # capture -> detect -> localize -> fuse + benchmark
   cameras.py             # threaded RTSP capture (TCP, auto-reconnect)
   detector.py            # YOLO + YOLO-World wrappers, device auto-detect
   audio.py               # audio capture, spectrogram, events, 2T/4T
+  transcribe.py          # Czech transcription + diarization (optional)
+  vehicles.py            # ANPR + make/model/age/drivetrain (optional)
   attributes.py          # experimental age estimation (optional)
-  settings.py            # thread-safe runtime settings store
+  db.py                  # SQLite object/event store + similarity merge
+  settings.py            # thread-safe runtime settings + startup persistence
+  logging_setup.py       # file + ring-buffer logging for the debug window
   calibration.py         # load/apply homographies (image -> world)
   geometry.py            # intrinsics K, scaling, solvePnP extrinsics
   fusion.py              # cross-camera merge + tracking + behavior
@@ -214,12 +294,16 @@ models/                  # YOLO weights (auto-downloaded, gitignored)
 ## API
 
 - `GET /` — the web UI.
-- `GET /api/config` — cameras, world frame, intrinsics, class colors, Czech labels, mode.
+- `GET /api/config` — cameras, world frame, intrinsics, class colors, Czech labels, features, mode.
 - `GET /api/settings` / `POST /api/settings` — read / live-update runtime settings.
-- `GET /api/state` — fused objects (+ behavior/age/engine), camera status, audio results.
+- `POST /api/settings/save-startup` — persist current settings as startup defaults.
+- `GET /api/state` — fused objects (+ behavior/age/engine/vehicle), camera status, audio, transcripts.
 - `GET /stream/{cam}` — annotated MJPEG video stream.
 - `GET /audio/{cam}/spectrogram` — MJPEG spectrogram stream.
-- `WS /ws` — pushes `{objects: [...], cameras: {...}, audio: {...}}` ~10×/s.
+- `GET /api/history/objects|events|stats` — browse the SQLite store.
+- `GET /api/benchmark` — device (GPU/CPU) + inference FPS estimate.
+- `GET /api/logs` / `POST /api/log-level` — debug log tail / set verbosity.
+- `WS /ws` — pushes `{objects, cameras, audio, transcripts}` ~10×/s.
 
 ## Validation
 
