@@ -15,14 +15,15 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from .classes import CLASS_COLORS
+from .classes import CLASS_COLORS, CLASS_LABELS_CS
 from .config import PROJECT_ROOT, load_config
 from .geometry import build_intrinsics
 from .pipeline import Pipeline
+from .settings import Settings
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -34,6 +35,7 @@ CONFIG_PATH = os.environ.get("CAMDETECT_CONFIG")
 MODE = os.environ.get("CAMDETECT_MODE", "live").lower()
 
 cfg = load_config(CONFIG_PATH) if CONFIG_PATH else load_config()
+settings = Settings(cfg)
 pipeline: Pipeline | None = None
 
 
@@ -41,7 +43,7 @@ pipeline: Pipeline | None = None
 async def lifespan(app: FastAPI):
     global pipeline
     logger.info("Starting pipeline in '%s' mode", MODE)
-    pipeline = Pipeline(cfg, mode=MODE)
+    pipeline = Pipeline(cfg, mode=MODE, settings=settings)
     pipeline.start()
     try:
         yield
@@ -82,8 +84,25 @@ def api_config() -> JSONResponse:
             "default_height_m": cfg.fusion.default_height_m,
         },
         "colors": {name: list(rgb) for name, rgb in CLASS_COLORS.items()},
+        "labels": CLASS_LABELS_CS,
         "mode": MODE,
     })
+
+
+@app.get("/api/settings")
+def api_get_settings() -> JSONResponse:
+    return JSONResponse(settings.snapshot())
+
+
+@app.post("/api/settings")
+async def api_set_settings(request: Request) -> JSONResponse:
+    try:
+        patch = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+    if not isinstance(patch, dict):
+        return JSONResponse({"error": "expected an object"}, status_code=400)
+    return JSONResponse(settings.update(patch))
 
 
 @app.get("/api/state")
@@ -93,18 +112,18 @@ def api_state() -> JSONResponse:
     return JSONResponse(pipeline.get_state())
 
 
-def _mjpeg_generator(cam_id: str):
+def _mjpeg_generator(source, fps: float = 15.0):
+    """Yield multipart JPEG frames from a callable returning latest bytes."""
+    import time
     boundary = b"--frame"
     while True:
-        jpeg = pipeline.latest_jpeg(cam_id) if pipeline else None
+        jpeg = source() if pipeline else None
         if jpeg:
             yield (boundary + b"\r\n"
                    b"Content-Type: image/jpeg\r\n"
                    b"Content-Length: " + str(len(jpeg)).encode() + b"\r\n\r\n"
                    + jpeg + b"\r\n")
-        # ~15 fps cap for the browser <img>; backend produces less on CPU.
-        import time
-        time.sleep(1 / 15)
+        time.sleep(1 / fps)
 
 
 @app.get("/stream/{cam_id}")
@@ -112,7 +131,17 @@ def stream(cam_id: str):
     if cfg.camera(cam_id) is None:
         return JSONResponse({"error": f"unknown camera {cam_id}"}, status_code=404)
     return StreamingResponse(
-        _mjpeg_generator(cam_id),
+        _mjpeg_generator(lambda: pipeline.latest_jpeg(cam_id)),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
+
+
+@app.get("/audio/{cam_id}/spectrogram")
+def audio_spectrogram(cam_id: str):
+    if cfg.camera(cam_id) is None:
+        return JSONResponse({"error": f"unknown camera {cam_id}"}, status_code=404)
+    return StreamingResponse(
+        _mjpeg_generator(lambda: pipeline.spectrogram_jpeg(cam_id), fps=4.0),
         media_type="multipart/x-mixed-replace; boundary=frame",
     )
 
